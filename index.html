@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>PENALTY OUT</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css"></head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" class="hide">
+  <div id="board"><div class="tm" id="n0"></div><div class="dots" id="d0"></div><div class="sc"><b id="s0">0</b>:<b id="s1">0</b></div><div class="dots" id="d1"></div><div class="tm" id="n1"></div></div>
+  <div id="role"></div><div id="taker"></div>
+  <div id="cross"></div>
+  <div id="power"><i></i></div>
+  <div id="banner"></div>
+  <div id="conn"></div>
+</div>
+<div id="pad" class="hide">
+  <div id="padL"><button data-k="KeyA">A</button><button data-k="KeyD">D</button></div>
+  <div id="padAim"><button data-k="ArrowUp">▲</button><div><button data-k="ArrowLeft">◀</button><button data-k="ArrowDown">▼</button><button data-k="ArrowRight">▶</button></div></div>
+  <div id="padDive"><button data-k="DiveHL">↖</button><button data-k="DiveUp">▲</button><button data-k="DiveHR">↗</button><button data-k="DiveL">↙</button><button data-k="DiveR">↘</button></div>
+  <button id="shootBtn" data-k="Space">SHOOT</button>
+</div>
+<div id="menu">
+  <div id="home" class="screen">
+    <h1>PENALTY<span>OUT</span></h1>
+    <p class="sub">Two real players. Five kicks each. One keeper to beat.</p>
+    <div class="teams"><button class="team sel" data-t="BAR">BARCELONA</button><button class="team" data-t="RMA">REAL MADRID</button></div>
+    <button class="big" id="bQuick">Play Online</button>
+    <button class="big alt" id="bCreate">Create Room</button>
+    <div class="row"><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button class="big alt" id="bJoin">Join Room</button></div>
+    <div class="row sm"><button id="bSound">Sound: On</button><button id="bFull">Fullscreen</button></div>
+    <p id="err"></p>
+  </div>
+  <div id="lobby" class="screen hide">
+    <h2>Room <b id="rc"></b></h2><p class="sub">Share this code with your opponent.</p>
+    <div id="pl"><div id="p0"></div><div id="p1"></div></div>
+    <button class="big" id="bReady">Ready</button>
+    <p class="sub" id="lmsg"></p>
+  </div>
+  <div id="end" class="screen hide"><h2 id="endT"></h2><button class="big" onclick="location.reload()">Back to menu</button></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
+</body></html>
