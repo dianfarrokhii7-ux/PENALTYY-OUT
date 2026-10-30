@@ -11,6 +11,7 @@ const io = new Server(srv, {
 });
 app.use(express.static(__dirname));
 
+const RUN = 0.5;
 const rooms = Object.create(null);
 let queue = null;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -78,10 +79,10 @@ function shoot(r, data) {
   const ay = clamp(Number(data.ay) || 0, 0, 1) + (Math.random() - .5) * spread * .6;
   const tx = ax * 4.5, ty = .2 + clamp(ay, 0, 1.2) * 2.8;
   const T = 1.15 - .65 * pw;
-  r.shot = { tx, ty, T, t0: Date.now() };
+  r.shot = { tx, ty, T, t0: Date.now() + RUN * 1000, run: RUN };
   r.phase = 'flight'; r.phaseAt = Date.now(); r.lastResult = null;
   emit(r, 'shot', { ...r.shot });
-  r.resolveTimer = setTimeout(() => resolve(r), T * 1000 + 80);
+  r.resolveTimer = setTimeout(() => resolve(r), RUN * 1000 + T * 1000 + 80);
 }
 function resolve(r) {
   if (r.phase !== 'flight' || !r.shot) return;
@@ -172,7 +173,7 @@ io.on('connection', socket => {
   });
   socket.on('dive', data => {
     const r = roomForSocket();
-    if (!r || socket.data.i === r.turn || r.phase !== 'flight' || r.dive) return;
+    if (!r || socket.data.i === r.turn || r.phase !== 'flight' || r.dive || !r.shot || Date.now() < r.shot.t0 - 150) return;
     r.dive = {
       dir: clamp(Math.round(Number(data && data.dir) || 0), -1, 1),
       hi: !!(data && data.hi), kx: clamp(Number(data && data.kx) || 0, -3, 3), at: Date.now()

@@ -46,3 +46,6 @@ input{background:rgba(255,255,255,.08);border:2px solid var(--chalk);border-radi
 @media (hover:hover) and (pointer:fine){#pad{display:none!important}}
 @media (max-height:420px){#pad button{width:54px;height:54px}#board{transform:translateX(-50%) scale(.8)}}
 @media (prefers-reduced-motion:reduce){#banner{transition:none}}
+
+.team.off{opacity:.2;pointer-events:none;text-decoration:line-through}
+button:disabled{opacity:.4;cursor:default}

@@ -9,15 +9,31 @@ Online 3D penalty shootout for two real players (Three.js + Node + Express + Soc
 5. Player 1: Create Room, share the 4-letter code. Player 2: type it, Join Room. Both press Ready.
 
 ## Deploy on Render
-1. Push this folder to a GitHub repository.
-2. Render > New > Web Service > connect the repo.
-3. Build command: `npm install`. Start command: `npm start`. Runtime: Node.
-4. Deploy, then share the `https://...onrender.com` URL. (Free instances sleep after idle; first load can take ~30 s.)
+1. Upload all project files (not the ZIP itself) to the root of the GitHub repository.
+2. Render > New > Web Service > connect the repository.
+3. Runtime: Node. Build command: `npm install`. Start command: `npm start`.
+4. Deploy, then share the `https://...onrender.com` URL.
+
+## Update an existing Render deployment
+1. Replace `server.js` and `game.js` in the same GitHub repository with these updated files. Keep `index.html`, `style.css`, and `package.json` unless you have made separate changes to them.
+2. Commit the changes to the branch connected to Render (usually `main`).
+3. In Render, open the existing Web Service and choose **Manual Deploy > Deploy latest commit** if automatic deploy is not enabled.
+4. Wait until the deployment status is **Live**, then hard-refresh the game page (Ctrl+Shift+R on Windows; on mobile, close the tab and reopen the link).
+5. Both players should close old game tabs, reopen the same new URL, create a NEW room, and test again. Old rooms from the previous server process will not carry over.
+
+## What the update fixes
+- Sends a full authoritative room snapshot on reconnect/refresh (`sync` event).
+- Restores the current turn, shot animation, goalkeeper dive and result screen instead of replaying only the generic game-start event.
+- Clears disconnect timers when a player reconnects.
+- Clears stale round timers before starting the next turn.
+- Resets goalkeeper position on each new turn and stores the last result for recovery.
 
 ## Controls
-Shooter (PC): Arrows aim, A/D fine aim, hold Space to charge, release to shoot. More power = faster but less accurate.
-Keeper (PC): A/D move, then Left/Right dive low, hold Up + Left/Right dive high, Space jump. Dive only works after the ball is struck.
-Mobile: on-screen pad (aim arrows + SHOOT, or move + dive buttons).
+Shooter (PC): Arrows aim, hold Space to charge, release to shoot. Keeper (PC): A/D move, then Left/Right dive low; Up + Left/Right dive high; Space jumps.
+Mobile: on-screen touch controls.
 
-## How it works
-The server decides every result: it receives the shot (aim, power) and the keeper's dive, adds power-based inaccuracy, and after the ball's flight time compares the ball's target with the keeper's reach (goal / save / post / miss). Clients animate the same shot from the same parameters. Disconnected players have 60 s to reconnect (session kept in sessionStorage).
+## v2 changes
+- Real match ball (ball.glb, FIFA Trionda) replaces the old ball; larger, with ground shadow. Keep ball.glb next to index.html.
+- ~5,800 spectators in 9-tier stands, animated, with crowd noise, chant beat, roars on goals and groans on saves/misses.
+- Run-up and kick animation; the keeper can only dive once the ball is struck.
+- Team selection moved into the lobby: it appears after both players are connected.

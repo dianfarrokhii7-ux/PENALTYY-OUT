@@ -20,6 +20,21 @@ function beep(f, d, type = 'sine', v = .15) {
     o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + d);
   } catch (e) {}
 }
+let cg, cf;
+function crowdStart() {
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === 'suspended') ac.resume(); if (cg) return;
+    const n = ac.createBuffer(1, ac.sampleRate * 3, ac.sampleRate), d = n.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const s = ac.createBufferSource(); s.buffer = n; s.loop = true; cf = ac.createBiquadFilter(); cf.type = 'bandpass'; cf.frequency.value = 600; cf.Q.value = .6;
+    cg = ac.createGain(); cg.gain.value = snd ? .05 : 0; s.connect(cf); cf.connect(cg); cg.connect(ac.destination); s.start();
+    let beat = 0; setInterval(() => { if (!snd) return; const p = beat++ % 8; if (p < 3 || p === 4) beep(85, .14, 'sine', .07); if (p === 5 || p === 6 || p === 7) beep(2800, .03, 'square', .015); }, 330);
+  } catch (e) {}
+}
+function crowdSet(level, freq, dur) {
+  if (!cg) return; const t = ac.currentTime;
+  cg.gain.cancelScheduledValues(t); cg.gain.setValueAtTime(cg.gain.value, t); cg.gain.linearRampToValueAtTime(snd ? level : 0, t + .25); cg.gain.linearRampToValueAtTime(snd ? .05 : 0, t + dur);
+  cf.frequency.cancelScheduledValues(t); cf.frequency.setValueAtTime(cf.frequency.value, t); cf.frequency.linearRampToValueAtTime(freq, t + .3); cf.frequency.linearRampToValueAtTime(600, t + dur);
+}
 const sfx = { whistle: () => { beep(2400, .35, 'square', .06); }, kick: () => beep(110, .15, 'triangle', .3), goal: () => [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)), save: () => beep(200, .25, 'sawtooth', .12), miss: () => beep(150, .4, 'sine', .15) };
 
 /* ---------- three.js scene ---------- */
@@ -59,25 +74,36 @@ const netP = (w, h, x, y, z, ry, rx) => { const m = new THREE.Mesh(new THREE.Pla
 netP(7.32, 2.44, 0, 1.22, -12.3); netP(1.3, 2.44, -3.66, 1.22, -11.65, Math.PI / 2); netP(1.3, 2.44, 3.66, 1.22, -11.65, Math.PI / 2); netP(7.32, 1.3, 0, 2.44, -11.65, 0, Math.PI / 2);
 
 /* stands + spectators */
-const specPos = [], pal = [0xa50044, 0x004d98, 0xffffff, 0xffd23f, 0x888888, 0xdd3333, 0x3366cc];
-const stand = (cx, cz, w, d, dirx, dirz, n) => {
-  for (let k = 0; k < 6; k++) {
-    const px = cx + dirx * k * 1.6, pz = cz + dirz * k * 1.6, big = new THREE.Mesh(new THREE.BoxGeometry(dirx ? 1.6 : w, 1.2 * (k + 1), dirz ? 1.6 : d), mat(0x3a3f4a));
-    big.position.set(px, .6 * (k + 1), pz); scene.add(big);
-    const len = dirx ? d : w, cnt = Math.floor(len / 1.2);
-    for (let i = 0; i < cnt; i++) specPos.push([dirx ? px : cx - w / 2 + i * 1.2, 1.2 * (k + 1) + .4, dirz ? pz : cz - d / 2 + i * 1.2]);
+const specPos = [], pal = [0xa50044, 0x004d98, 0xffffff, 0xffd23f, 0xe8e8f0, 0xdd3333, 0x3366cc, 0x222222, 0x2ecc71];
+const stand = (cx, cz, w, d, dx, dz) => {
+  for (let k = 0; k < 9; k++) {
+    const px = cx + dx * k * 1.6, pz = cz + dz * k * 1.6, h = 1.2 * (k + 1);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(dx ? 1.6 : w, h, dz ? 1.6 : d), mat(0x3a3f4a)); b.position.set(px, h / 2, pz); scene.add(b);
+    const len = dx ? d : w, n = Math.floor(len / .75);
+    for (let r = -1; r <= 1; r += 2) for (let i = 0; i < n; i++) {
+      const o = -len / 2 + i * .75 + Math.random() * .2;
+      specPos.push(dx ? [px + r * .4 * dx, h + .45, cz + o] : [cx + o, h + .45, pz + r * .4 * dz]);
+    }
   }
 };
 stand(0, -21, 64, 1.6, 0, -1); stand(0, 41, 64, 1.6, 0, 1); stand(-31, 10, 1.6, 56, -1, 0); stand(31, 10, 1.6, 56, 1, 0);
-const spec = new THREE.InstancedMesh(new THREE.BoxGeometry(.45, .8, .4), new THREE.MeshLambertMaterial(), specPos.length), dm = new THREE.Object3D(), phase0 = specPos.map(() => Math.random() * 6);
-specPos.forEach((p, i) => spec.setColorAt(i, new THREE.Color(pal[i * 7 % pal.length])));
-scene.add(spec);
+const NG = 4, specGroups = [], dm = new THREE.Object3D(), skin = [0xd9a77a, 0xf1c7a0, 0x8d5a3b, 0xc68642];
+for (let q = 0; q < NG; q++) {
+  const grp = new THREE.Group(), pts = specPos.filter((_, i) => i % NG === q);
+  const bodies = new THREE.InstancedMesh(new THREE.BoxGeometry(.5, .8, .4), new THREE.MeshLambertMaterial(), pts.length);
+  const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(.17, 6, 5), new THREE.MeshLambertMaterial(), pts.length);
+  pts.forEach((p, i) => {
+    dm.position.set(p[0], p[1], p[2]); dm.updateMatrix(); bodies.setMatrixAt(i, dm.matrix);
+    dm.position.y += .62; dm.updateMatrix(); heads.setMatrixAt(i, dm.matrix);
+    bodies.setColorAt(i, new THREE.Color(pal[Math.floor(Math.random() * pal.length)])); heads.setColorAt(i, new THREE.Color(skin[i % 4]));
+  });
+  grp.add(bodies, heads); scene.add(grp); specGroups.push(grp);
+}
 function bobSpec(t, celebrate) {
-  specPos.forEach((p, i) => { dm.position.set(p[0], p[1] + Math.max(0, Math.sin(t * (celebrate ? 8 : 2) + phase0[i])) * (celebrate ? .5 : .08), p[2]); dm.updateMatrix(); spec.setMatrixAt(i, dm.matrix); });
-  spec.instanceMatrix.needsUpdate = true;
+  specGroups.forEach((g, i) => { g.position.y = Math.max(0, Math.sin(t * (celebrate ? 9 : 2.2) + i * 1.7)) * (celebrate ? .45 : .06); });
 }
 /* floodlights */
-[[-36, -24], [36, -24], [-36, 44], [36, 44]].forEach(([x, z]) => {
+[[-54, -42], [54, -42], [-54, 62], [54, 62]].forEach(([x, z]) => {
   const t = new THREE.Mesh(new THREE.CylinderGeometry(.3, .4, 24, 8), mat(0x555a66)); t.position.set(x, 12, z); scene.add(t);
   const h = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 1), new THREE.MeshBasicMaterial({ color: 0xfffbe0 })); h.position.set(x, 25, z); h.lookAt(0, 10, 10); scene.add(h);
 });
@@ -90,8 +116,11 @@ function person(shirt, shorts) {
   g.parts = { L: limb(-.13, .95, .18, .9, shorts), R: limb(.13, .95, .18, .9, shorts), AL: limb(-.34, 1.5, .13, .6, shirt), AR: limb(.34, 1.5, .13, .6, shirt) };
   g.add(box(.5, .65, .28, shirt, 1.25), head, g.parts.L, g.parts.R, g.parts.AL, g.parts.AR); return g;
 }
-const ball = new THREE.Mesh(new THREE.SphereGeometry(.11, 14, 10), new THREE.MeshLambertMaterial({ map: (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 64, 64); x.fillStyle = '#111'; for (let i = 0; i < 6; i++) { x.beginPath(); x.arc(10 + i * 11 % 60, 12 + i * 23 % 56, 7, 0, 7); x.fill(); } return new THREE.CanvasTexture(c); })() }));
-scene.add(ball);
+const BR = .18, RUN = .5, ball = new THREE.Group(), ballFb = new THREE.Mesh(new THREE.SphereGeometry(BR, 16, 12), mat(0xffffff));
+ball.add(ballFb); scene.add(ball);
+const bshadow = new THREE.Mesh(new THREE.CircleGeometry(1, 16), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .35, depthWrite: false }));
+bshadow.rotation.x = -Math.PI / 2; scene.add(bshadow);
+if (THREE.GLTFLoader) new THREE.GLTFLoader().load('ball.glb', gl => { const m = gl.scene; m.scale.setScalar(BR / .1132); ball.remove(ballFb); ball.add(m); }, undefined, () => {});
 let kicker = null, keeper = null, kx = 0, kxT = 0, dv = null, cel = null, B = { mode: 'rest' }, kickAnim = 0;
 let ax = 0, ay = .35, pw = 0, charging = false;
 
@@ -99,9 +128,9 @@ function setupTurn(d) {
   st = d; ph = 'aim'; role = me === st.turn ? 'shooter' : 'keeper';
   [kicker, keeper].forEach(o => o && scene.remove(o));
   const tt = TEAMS[st.team[st.turn]];
-  kicker = person(tt.c, tt.c2 === tt.c ? 0x14143a : tt.c2); kicker.position.set(0, 0, 1.6); scene.add(kicker);
+  kicker = person(tt.c, tt.c2 === tt.c ? 0x14143a : tt.c2); kicker.position.set(0, 0, 3.2); scene.add(kicker);
   keeper = person(0xd7ff3a, 0x111111); keeper.position.set(0, 0, -11); scene.add(keeper);
-  kx = kxT = 0; dv = null; cel = null; ax = 0; ay = .35; pw = 0; charging = false; B = { mode: 'rest' }; kickAnim = 0; ball.position.set(0, .11, 0);
+  kx = kxT = 0; dv = null; cel = null; ax = 0; ay = .35; pw = 0; charging = false; B = { mode: 'rest' }; kickAnim = 0; ball.position.set(0, BR, 0);
   const slot = d.slot, ot = TEAMS[st.team[1 - st.turn]];
   $('taker').textContent = `${tt.r[slot < 4 ? slot + 1 : 0]}  vs  ${ot.r[0]} (GK)`;
   $('role').textContent = role === 'shooter' ? 'YOUR PENALTY — aim, hold SPACE to charge, release to shoot' : 'DEFEND — move with A / D, then dive with ← → once the ball is struck';
@@ -123,7 +152,7 @@ function banner(t, c) { const b = $('banner'); b.textContent = t; b.style.color 
 
 /* ---------- input ---------- */
 function doDive(sd, hi) {
-  if (role !== 'keeper' || ph !== 'flight' || dv) return;
+  if (role !== 'keeper' || ph !== 'flight' || dv || (B.mode === 'fly' && B.t < -.15)) return;
   const dir = -sd; sock.emit('dive', { dir, hi, kx }); startDive(dir, hi);
 }
 function startDive(dir, hi) { dv = { t: 0, dir, hi, x0: kx }; }
@@ -156,19 +185,19 @@ sock.on('joined', d => {
 });
 sock.on('room', d => {
   st = d; hud();
-  [0, 1].forEach(i => { const e = $('p' + i); e.textContent = (i === me ? 'You' : 'Opponent') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); });
+  [0, 1].forEach(i => { const e = $('p' + i); e.textContent = (i === me ? 'You' : 'Opponent') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); }); lobbyUI(d);
 });
-sock.on('start', d => { st = d; $('menu').classList.add('off'); $('hud').classList.remove('hide'); $('pad').classList.remove('hide'); hud(); });
+sock.on('start', d => { crowdStart(); st = d; $('menu').classList.add('off'); $('hud').classList.remove('hide'); $('pad').classList.remove('hide'); hud(); });
 sock.on('turn', setupTurn);
 sock.on('kx', x => { kxT = x; });
 sock.on('dive', d => startDive(d.dir, d.hi));
 function applyShot(d, quiet = false) {
   ph = 'flight';
   const elapsed = d.t0 ? Math.max(0, (Date.now() - d.t0) / 1000) : 0;
-  B = { mode: 'fly', t: Math.min(elapsed, d.T), T: d.T, tx: d.tx, ty: d.ty };
+  B = { mode: 'fly', t: quiet ? Math.min(elapsed, d.T) : -RUN, T: d.T, tx: d.tx, ty: d.ty, k: quiet ? 1 : 0 };
   kickAnim = .0001;
   if (d.dive && !dv) startDive(d.dive.dir, d.dive.hi);
-  if (!quiet) sfx.kick();
+  if (!quiet) sfx.whistle();
 }
 function applyResult(d, quiet = false) {
   ph = 'result'; st.score = d.score; st.kicks = d.kicks; st.log = d.log; hud();
@@ -183,7 +212,7 @@ function applyResult(d, quiet = false) {
   }
   cel = { p: goal ? kicker : d.res === 'save' ? keeper : null, t: 0 };
   banner(goal ? 'GOAL!' : d.res === 'save' ? 'SAVED!' : d.res === 'post' ? 'OFF THE POST!' : 'MISS!', goal ? '#2ecc71' : '#e63946');
-  if (!quiet) sfx[goal ? 'goal' : d.res === 'save' ? 'save' : 'miss']();
+  if (!quiet) sfx[goal ? 'goal' : d.res === 'save' ? 'save' : 'miss'](); if (goal) crowdSet(.45, 1000, 4.5); else if (d.res === 'save') crowdSet(.25, 700, 3); else crowdSet(.18, 400, 2.5);
   if (goal) bobBoost = 3;
 }
 sock.on('shot', d => applyShot(d));
@@ -196,7 +225,7 @@ sock.on('sync', d => {
     $('menu').classList.remove('off'); $('home').classList.add('hide'); $('lobby').classList.remove('hide');
     $('hud').classList.add('hide'); $('pad').classList.add('hide'); $('rc').textContent = d.code;
     hud();
-    [0, 1].forEach(i => { const e = $('p' + i); e.textContent = (i === me ? 'You' : 'Opponent') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); });
+    [0, 1].forEach(i => { const e = $('p' + i); e.textContent = (i === me ? 'You' : 'Opponent') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); }); lobbyUI(d);
     return;
   }
   if (d.phase === 'end') {
@@ -222,13 +251,21 @@ sock.on('end', d => {
   $('endT').textContent = `${d.winner === me ? 'YOU WIN' : 'YOU LOSE'}  ${d.score[me]} – ${d.score[1 - me]}`;
 });
 
+function lobbyUI(d) {
+  const both = d.conn[0] && d.conn[1], mine = d.ready && d.ready[me], opp = d.ready && d.ready[1 - me] ? d.team[1 - me] : null;
+  if (opp && myTeam === opp && !mine) { myTeam = opp === 'BAR' ? 'RMA' : 'BAR'; }
+  $('lt').classList.toggle('hide', !both);
+  document.querySelectorAll('.team').forEach(b => { b.classList.toggle('sel', b.dataset.t === myTeam); b.classList.toggle('off', b.dataset.t === opp || !!mine); });
+  $('bReady').disabled = !both || !!mine;
+  $('lmsg').textContent = !both ? 'Waiting for your opponent to join…' : mine ? 'Waiting for your opponent to be ready…' : opp ? 'Opponent picked ' + TEAMS[opp].n + '. Choose yours, then press Ready.' : 'Both players connected. Choose your team, then press Ready.';
+}
 /* ---------- menu ---------- */
 document.querySelectorAll('.team').forEach(b => b.onclick = () => { document.querySelectorAll('.team').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); myTeam = b.dataset.t; });
 $('bQuick').onclick = () => { sessionStorage.removeItem('po'); sock.emit('quick'); };
 $('bCreate').onclick = () => { sessionStorage.removeItem('po'); sock.emit('create'); };
 $('bJoin').onclick = () => { sessionStorage.removeItem('po'); sock.emit('join', $('code').value); };
-$('bReady').onclick = () => { sock.emit('ready', myTeam); $('bReady').disabled = true; $('lmsg').textContent = 'Waiting for both players to be ready…'; };
-$('bSound').onclick = () => { snd = !snd; $('bSound').textContent = 'Sound: ' + (snd ? 'On' : 'Off'); };
+$('bReady').onclick = () => { sock.emit('ready', myTeam); $('bReady').disabled = true; };
+$('bSound').onclick = () => { snd = !snd; if (cg) cg.gain.value = snd ? .05 : 0; $('bSound').textContent = 'Sound: ' + (snd ? 'On' : 'Off'); };
 $('bFull').onclick = () => { const d = document.documentElement; document.fullscreenElement ? document.exitFullscreen() : (d.requestFullscreen || d.webkitRequestFullscreen || (() => {})).call(d); };
 
 /* ---------- loop ---------- */
@@ -262,24 +299,36 @@ function loop(now) {
       keeper.rotation.z = -dv.dir * 1.3 * e; keeper.parts.AL.rotation.z = -2.8 * e; keeper.parts.AR.rotation.z = 2.8 * e;
     } else if (keeper) { keeper.parts.AL.rotation.z = -.3; keeper.parts.AR.rotation.z = .3; }
     /* kick animation */
-    if (kickAnim > 0) { kickAnim += dt; const k = Math.min(kickAnim / .18, 1); kicker.parts.R.rotation.x = -.8 + 2 * k; kicker.position.z = 1.6 - Math.min(kickAnim * 3, 1.2); }
+    if (B.mode === 'fly' || B.mode === 'free') {
+      const tt = B.t, P = kicker.parts;
+      if (tt < 0) {
+        const u = (tt + RUN) / RUN, w = Math.sin(u * 11) * .9;
+        kicker.position.z = 3.2 - 2.85 * u; P.L.rotation.x = w; P.R.rotation.x = -w; P.AL.rotation.x = -w * .8; P.AR.rotation.x = w * .8; kicker.rotation.x = .12;
+        if (u > .8) { P.R.rotation.x = -1.1; P.L.rotation.x = .1; }
+      } else {
+        const kk = Math.min(tt / .09, 1); P.R.rotation.x = -1.1 + 2.7 * kk; P.L.rotation.x = .15; P.AL.rotation.x = .6; P.AR.rotation.x = -.6;
+        kicker.position.z = .35 - Math.min(tt, .6) * .9; kicker.rotation.x = .12 - Math.min(tt, .5) * .2;
+      }
+    }
     /* celebration */
     if (cel && cel.p) { cel.t += dt; cel.p.position.y = Math.abs(Math.sin(cel.t * 6)) * .35; cel.p.parts.AL.rotation.z = -2.6; cel.p.parts.AR.rotation.z = 2.6; }
   }
   /* ball */
   if (B.mode === 'fly') {
-    B.t += dt; const s = Math.min(B.t / B.T, 1);
-    ball.position.set(B.tx * s, .11 + (B.ty - .11) * s + 1.2 * s * (1 - s), -11 * s);
-    ball.rotation.x -= dt * 12;
+    B.t += dt; const s = Math.max(0, Math.min(B.t / B.T, 1));
+    if (!B.k && B.t >= 0) { B.k = 1; sfx.kick(); crowdSet(.14, 800, 1.6); }
+    ball.position.set(B.tx * s, BR + (B.ty - BR) * s + 1.2 * s * (1 - s), -11 * s);
+    if (B.t > 0) { ball.rotation.x -= dt * 14; ball.rotation.z += dt * 5; }
     if (s >= 1) { B.mode = 'free'; B.vx = B.tx / B.T * .5; B.vy = 0; B.vz = -11 / B.T * .5; }
   } else if (B.mode === 'free') {
     B.vy -= 9.8 * dt; const p = ball.position; p.x += B.vx * dt; p.y += B.vy * dt; p.z += B.vz * dt;
-    if (p.y < .11) { p.y = .11; B.vy = Math.abs(B.vy) > .6 ? -B.vy * .5 : 0; B.vx *= .96; B.vz *= .96; }
+    if (p.y < BR) { p.y = BR; B.vy = Math.abs(B.vy) > .6 ? -B.vy * .5 : 0; B.vx *= .96; B.vz *= .96; }
     if (p.z < -12.2 && Math.abs(p.x) < 3.7 && p.y < 2.5) { p.z = -12.2; B.vz = 0; B.vx *= .3; }
     ball.rotation.x -= B.vz * dt * 2;
   }
+  bshadow.position.set(ball.position.x, .02, ball.position.z); const sh = BR * (1 + ball.position.y * .25); bshadow.scale.set(sh, sh, sh); bshadow.material.opacity = Math.max(.08, .35 - ball.position.y * .12);
   /* camera */
-  if (role === 'shooter') { tmp.set(kicker ? kicker.position.x * .6 : 0, 1.9, 5.6); lookT.set(0, 1.1, -11); }
+  if (role === 'shooter') { tmp.set(kicker ? kicker.position.x * .6 : 0, 1.9, 5.6); lookT.set(B.mode === 'fly' || B.mode === 'free' ? ball.position.x * .3 : 0, 1.1, -11); }
   else { tmp.set(0, 2.4, -14.8); lookT.set(0, 1.0, 3); }
   const k = Math.min(1, dt * 3); camPos.lerp(tmp, k); camLook.lerp(lookT, k); cam.position.copy(camPos); cam.lookAt(camLook);
   R.render(scene, cam);
