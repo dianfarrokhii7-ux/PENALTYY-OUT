@@ -37,3 +37,11 @@ Mobile: on-screen touch controls.
 - ~5,800 spectators in 9-tier stands, animated, with crowd noise, chant beat, roars on goals and groans on saves/misses.
 - Run-up and kick animation; the keeper can only dive once the ball is struck.
 - Team selection moved into the lobby: it appears after both players are connected.
+
+## v3: Friendly Match 5v5 (friendly.html)
+Open `/friendly.html` (button "Friendly Match 5v5" on the main menu). The penalty mode is unchanged.
+- Flow: create/join room -> both connected -> pick teams -> pick formation and swap positions (line-up) -> match.
+- 2 halves x 2:30, sides swap at half time. Server simulates all 10 players and the ball at 30 Hz; each human controls one player per team, the other four are AI that return to their posts.
+- Rules: kick-off, throw-ins, goal kicks, corners, fouls (tackle from behind is risky), yellow/red cards (red = team plays a man down), free kicks, penalties.
+- Controls PC: WASD move, Shift sprint, F pass, Space shoot (hold for power), C tackle, V switch player. Mobile: joystick + SWITCH / TACKLE / PASS / SHOOT / SPRINT buttons.
+- Not yet: offside, substitutions, extra time/penalty shootout after a draw, AI difficulty levels.
