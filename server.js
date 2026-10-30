@@ -1,100 +1,201 @@
-const express = require('express'), http = require('http'), { Server } = require('socket.io');
-const app = express(), srv = http.createServer(app), io = new Server(srv);
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const app = express();
+const srv = http.createServer(app);
+const io = new Server(srv, {
+  cors: { origin: true, credentials: true },
+  pingInterval: 25000,
+  pingTimeout: 20000,
+});
 app.use(express.static(__dirname));
-const rooms = {}; let queue = null;
+
+const rooms = Object.create(null);
+let queue = null;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const tok = () => Math.random().toString(36).slice(2, 12);
+
 function mkRoom() {
-  let c; do c = Math.random().toString(36).slice(2, 6).toUpperCase(); while (rooms[c]);
-  return rooms[c] = { code: c, p: [null, null], team: ['BAR', 'RMA'], ready: [false, false], score: [0, 0], kicks: [0, 0], log: [[], []], turn: 0, phase: 'lobby', kx: 0, dive: null, shot: null, waiting: false };
+  let code;
+  do code = Math.random().toString(36).slice(2, 6).toUpperCase(); while (rooms[code]);
+  return rooms[code] = {
+    code, p: [null, null], team: ['BAR', 'RMA'], ready: [false, false],
+    score: [0, 0], kicks: [0, 0], log: [[], []], turn: 0,
+    phase: 'lobby', kx: 0, dive: null, shot: null, lastResult: null,
+    waiting: false, winner: null, phaseAt: Date.now(), to: null, resolveTimer: null, advanceTimer: null,
+  };
 }
-const state = r => ({ code: r.code, team: r.team, score: r.score, kicks: r.kicks, log: r.log, turn: r.turn, phase: r.phase, conn: r.p.map(p => !!(p && p.on)) });
-const emit = (r, ev, d) => io.to(r.code).emit(ev, d);
-function seat(r, s, i) {
-  r.p[i] = { id: s.id, token: tok(), on: true }; s.join(r.code); s.data = { code: r.code, i };
-  s.emit('joined', { code: r.code, i, token: r.p[i].token });
+
+function state(r) {
+  return {
+    code: r.code, team: [...r.team], score: [...r.score], kicks: [...r.kicks],
+    log: r.log.map(x => [...x]), turn: r.turn, phase: r.phase,
+    conn: r.p.map(p => !!(p && p.on)), ready: [...r.ready],
+    kx: r.kx, dive: r.dive ? { ...r.dive } : null,
+    shot: r.shot ? { ...r.shot } : null,
+    lastResult: r.lastResult ? { ...r.lastResult } : null, winner: r.winner,
+    phaseAt: r.phaseAt,
+  };
+}
+const emit = (r, event, data) => io.to(r.code).emit(event, data);
+function clearRoomTimers(r) {
+  clearTimeout(r.to); clearTimeout(r.resolveTimer); clearTimeout(r.advanceTimer);
+}
+function seat(r, socket, i) {
+  r.p[i] = { id: socket.id, token: tok(), on: true, disconnectTimer: null };
+  socket.join(r.code);
+  socket.data = { code: r.code, i };
+  socket.emit('joined', { code: r.code, i, token: r.p[i].token });
   emit(r, 'room', state(r));
 }
-function join(s, r) {
+function join(socket, r) {
   const i = r.p[0] ? (r.p[1] ? -1 : 1) : 0;
-  if (i < 0) return s.emit('err', 'Room is full');
-  seat(r, s, i);
+  if (i < 0) return socket.emit('err', 'Room is full');
+  seat(r, socket, i);
 }
 function begin(r) {
   if (r.phase !== 'lobby' || !r.ready[0] || !r.ready[1]) return;
-  r.phase = 'idle'; emit(r, 'start', state(r)); setTimeout(() => nextTurn(r), 2500);
+  r.phase = 'idle'; r.phaseAt = Date.now();
+  emit(r, 'start', state(r));
+  clearTimeout(r.advanceTimer);
+  r.advanceTimer = setTimeout(() => nextTurn(r), 1800);
 }
 function nextTurn(r) {
+  clearTimeout(r.to); clearTimeout(r.resolveTimer); clearTimeout(r.advanceTimer);
   if (r.p.some(p => !p || !p.on)) { r.waiting = true; return; }
-  r.waiting = false; r.phase = 'aim'; r.dive = null; r.shot = null;
+  r.waiting = false; r.phase = 'aim'; r.phaseAt = Date.now();
+  r.dive = null; r.shot = null; r.lastResult = null; r.kx = 0;
   emit(r, 'turn', { ...state(r), slot: r.kicks[r.turn] % 5 });
-  clearTimeout(r.to); r.to = setTimeout(() => shoot(r, { ax: 0, ay: .3, pw: .5 }), 25000);
+  r.to = setTimeout(() => shoot(r, { ax: 0, ay: .3, pw: .5 }), 25000);
 }
-function shoot(r, s) {
-  if (r.phase !== 'aim') return; clearTimeout(r.to);
-  const pw = clamp(+s.pw || 0, 0, 1), j = Math.pow(pw, 3) * 1.1;
-  const ax = clamp(+s.ax || 0, -1, 1) + (Math.random() - .5) * j, ay = clamp(+s.ay || 0, 0, 1) + (Math.random() - .5) * j * .6;
-  const tx = ax * 4.5, ty = .2 + clamp(ay, 0, 1.2) * 2.8, T = 1.15 - .65 * pw;
-  r.shot = { tx, ty, T, t0: Date.now() }; r.phase = 'flight';
-  emit(r, 'shot', { tx, ty, T }); setTimeout(() => resolve(r), T * 1000 + 30);
+function shoot(r, data) {
+  if (r.phase !== 'aim' || !r.p[r.turn] || !r.p[r.turn].on) return;
+  clearTimeout(r.to);
+  const pw = clamp(Number(data.pw) || 0, 0, 1);
+  const spread = Math.pow(pw, 3) * 1.1;
+  const ax = clamp(Number(data.ax) || 0, -1, 1) + (Math.random() - .5) * spread;
+  const ay = clamp(Number(data.ay) || 0, 0, 1) + (Math.random() - .5) * spread * .6;
+  const tx = ax * 4.5, ty = .2 + clamp(ay, 0, 1.2) * 2.8;
+  const T = 1.15 - .65 * pw;
+  r.shot = { tx, ty, T, t0: Date.now() };
+  r.phase = 'flight'; r.phaseAt = Date.now(); r.lastResult = null;
+  emit(r, 'shot', { ...r.shot });
+  r.resolveTimer = setTimeout(() => resolve(r), T * 1000 + 80);
 }
 function resolve(r) {
-  const { tx, ty, T, t0 } = r.shot; let res;
-  if (Math.abs(tx) > 3.66 || ty > 2.44) res = 'miss';
-  else if (Math.abs(Math.abs(tx) - 3.66) < .12 || Math.abs(ty - 2.44) < .1) res = 'post';
+  if (r.phase !== 'flight' || !r.shot) return;
+  const { tx, ty } = r.shot;
+  let result;
+  if (Math.abs(tx) > 3.66 || ty > 2.44) result = 'miss';
+  else if (Math.abs(Math.abs(tx) - 3.66) < .12 || Math.abs(ty - 2.44) < .1) result = 'post';
   else {
-    const d = r.dive, kx = d ? d.kx : r.kx; let ex = kx, cy = .9, rx = .8, ry = 1.0;
-    if (d) {
-      const late = (d.at - t0) > T * 1000 - 280, f = late ? .55 : 1;
-      ex = kx + d.dir * 2.6 * f; cy = d.hi ? 1.7 : .8; rx = 1.2; ry = 1.0;
+    const dive = r.dive;
+    let ex = dive ? dive.kx : r.kx, cy = .9, rx = .8, ry = 1;
+    if (dive) {
+      const late = (dive.at - r.shot.t0) > r.shot.T * 1000 - 280;
+      ex = dive.kx + dive.dir * 2.6 * (late ? .55 : 1);
+      cy = dive.hi ? 1.7 : .8; rx = 1.2;
     }
-    res = (Math.abs(tx - ex) < rx && Math.abs(ty - cy) < ry) ? 'save' : 'goal';
+    result = (Math.abs(tx - ex) < rx && Math.abs(ty - cy) < ry) ? 'save' : 'goal';
   }
-  const t = r.turn; r.kicks[t]++; if (res === 'goal') r.score[t]++; r.log[t].push(res === 'goal' ? 1 : 0);
-  r.phase = 'result'; emit(r, 'result', { res, score: r.score, kicks: r.kicks, log: r.log, tx, ty });
-  setTimeout(() => {
+  const teamIndex = r.turn;
+  r.kicks[teamIndex]++;
+  if (result === 'goal') r.score[teamIndex]++;
+  r.log[teamIndex].push(result === 'goal' ? 1 : 0);
+  r.phase = 'result'; r.phaseAt = Date.now();
+  r.lastResult = { res: result, score: [...r.score], kicks: [...r.kicks], log: r.log.map(x => [...x]), tx, ty, at: r.phaseAt };
+  emit(r, 'result', r.lastResult);
+  r.advanceTimer = setTimeout(() => {
     const [a, b] = r.kicks, [x, y] = r.score;
-    const over = (a <= 5 && b <= 5 && (a < 5 || b < 5)) ? (x > y + (5 - b) || y > x + (5 - a)) : (a === b && x !== y);
-    if (over) { r.phase = 'end'; emit(r, 'end', { score: r.score, winner: x > y ? 0 : 1, team: r.team }); }
-    else { r.turn = 1 - r.turn; nextTurn(r); }
+    const regulationOver = a >= 5 && b >= 5;
+    const decidedEarly = (a <= 5 && b <= 5 && (a < 5 || b < 5)) && (x > y + (5 - b) || y > x + (5 - a));
+    const suddenDeathOver = regulationOver && a === b && x !== y;
+    if (decidedEarly || suddenDeathOver) {
+      r.phase = 'end'; r.phaseAt = Date.now(); r.winner = x > y ? 0 : 1;
+      emit(r, 'end', { score: [...r.score], winner: r.winner, team: [...r.team] });
+    } else {
+      r.turn = 1 - r.turn;
+      nextTurn(r);
+    }
   }, 3200);
 }
-io.on('connection', s => {
-  const R = () => s.data && rooms[s.data.code];
-  s.on('create', () => { const r = mkRoom(); seat(r, s, 0); });
-  s.on('join', c => { const r = rooms[String(c).toUpperCase().trim()]; r ? join(s, r) : s.emit('err', 'Room not found'); });
-  s.on('quick', () => {
-    if (queue && rooms[queue] && !rooms[queue].p[1]) { join(s, rooms[queue]); queue = null; }
-    else { const r = mkRoom(); queue = r.code; seat(r, s, 0); }
+
+io.on('connection', socket => {
+  const roomForSocket = () => socket.data && rooms[socket.data.code];
+
+  socket.on('create', () => { const r = mkRoom(); seat(r, socket, 0); });
+  socket.on('join', code => {
+    const r = rooms[String(code || '').toUpperCase().trim()];
+    r ? join(socket, r) : socket.emit('err', 'Room not found');
   });
-  s.on('rejoin', ({ code, token }) => {
-    const r = rooms[code]; const i = r && r.p.findIndex(p => p && p.token === token);
-    if (!r || i < 0) return s.emit('err', 'Session expired');
-    r.p[i].id = s.id; r.p[i].on = true; s.join(code); s.data = { code, i };
-    s.emit('joined', { code, i, token }); emit(r, 'room', state(r));
-    if (r.phase !== 'lobby') s.emit('start', state(r));
-    if (r.waiting) nextTurn(r);
+  socket.on('quick', () => {
+    if (queue && rooms[queue] && !rooms[queue].p[1]) { join(socket, rooms[queue]); queue = null; }
+    else { const r = mkRoom(); queue = r.code; seat(r, socket, 0); }
   });
-  s.on('ready', t => {
-    const r = R(); if (!r || r.phase !== 'lobby') return; const i = s.data.i;
-    const want = t === 'RMA' ? 'RMA' : 'BAR';
-    if (r.ready[1 - i] && r.team[1 - i] === want) r.team[i] = want === 'BAR' ? 'RMA' : 'BAR'; else r.team[i] = want;
-    r.ready[i] = true; emit(r, 'room', state(r)); begin(r);
+
+  socket.on('rejoin', payload => {
+    const code = payload && String(payload.code || '').toUpperCase();
+    const token = payload && payload.token;
+    const r = rooms[code];
+    const i = r ? r.p.findIndex(p => p && p.token === token) : -1;
+    if (!r || i < 0) return socket.emit('err', 'Session expired');
+    const player = r.p[i];
+    clearTimeout(player.disconnectTimer);
+    player.id = socket.id; player.on = true;
+    socket.join(code); socket.data = { code, i };
+    socket.emit('joined', { code, i, token });
+    emit(r, 'room', state(r));
+    // A full authoritative snapshot replaces the old incomplete `start` replay.
+    socket.emit('sync', { ...state(r), slot: r.kicks[r.turn] % 5 });
+    if (r.waiting && r.p.every(p => p && p.on)) nextTurn(r);
   });
-  s.on('shoot', d => { const r = R(); if (r && s.data.i === r.turn) shoot(r, d); });
-  s.on('kx', x => { const r = R(); if (r && s.data.i !== r.turn && r.phase !== 'result') { r.kx = clamp(+x || 0, -3, 3); s.to(r.code).emit('kx', r.kx); } });
-  s.on('dive', d => {
-    const r = R(); if (!r || s.data.i === r.turn || r.phase !== 'flight' || r.dive) return;
-    r.dive = { dir: clamp(Math.round(+d.dir || 0), -1, 1), hi: !!d.hi, kx: clamp(+d.kx || 0, -3, 3), at: Date.now() };
-    s.to(r.code).emit('dive', r.dive);
+
+  socket.on('ready', team => {
+    const r = roomForSocket(); if (!r || r.phase !== 'lobby') return;
+    const i = socket.data.i;
+    const wanted = team === 'RMA' ? 'RMA' : 'BAR';
+    r.team[i] = r.ready[1 - i] && r.team[1 - i] === wanted ? (wanted === 'BAR' ? 'RMA' : 'BAR') : wanted;
+    r.ready[i] = true;
+    emit(r, 'room', state(r)); begin(r);
   });
-  s.on('disconnect', () => {
-    const r = R(); if (!r) return; const p = r.p[s.data.i]; if (!p || p.id !== s.id) return;
-    p.on = false; emit(r, 'room', state(r));
-    setTimeout(() => {
-      if (!p.on && r.phase !== 'end') { emit(r, 'err', 'Opponent left the match'); r.phase = 'end'; clearTimeout(r.to); }
-      if (r.p.every(q => !q || !q.on)) delete rooms[r.code];
+
+  socket.on('shoot', data => {
+    const r = roomForSocket(); if (r && socket.data.i === r.turn) shoot(r, data || {});
+  });
+  socket.on('kx', value => {
+    const r = roomForSocket();
+    if (r && socket.data.i !== r.turn && r.phase === 'aim') {
+      r.kx = clamp(Number(value) || 0, -3, 3);
+      socket.to(r.code).emit('kx', r.kx);
+    }
+  });
+  socket.on('dive', data => {
+    const r = roomForSocket();
+    if (!r || socket.data.i === r.turn || r.phase !== 'flight' || r.dive) return;
+    r.dive = {
+      dir: clamp(Math.round(Number(data && data.dir) || 0), -1, 1),
+      hi: !!(data && data.hi), kx: clamp(Number(data && data.kx) || 0, -3, 3), at: Date.now()
+    };
+    socket.to(r.code).emit('dive', r.dive);
+  });
+
+  socket.on('disconnect', () => {
+    const r = roomForSocket(); if (!r) return;
+    const player = r.p[socket.data.i];
+    if (!player || player.id !== socket.id) return;
+    player.on = false; emit(r, 'room', state(r));
+    clearTimeout(player.disconnectTimer);
+    player.disconnectTimer = setTimeout(() => {
+      if (!player.on && r.phase !== 'end') {
+        r.phase = 'end'; r.phaseAt = Date.now(); r.winner = null; clearRoomTimers(r);
+        emit(r, 'err', 'Opponent left the match');
+        emit(r, 'end', { score: [...r.score], winner: null, team: [...r.team], reason: 'disconnect' });
+      }
+      if (r.p.every(p => !p || !p.on)) delete rooms[r.code];
     }, 60000);
   });
 });
-srv.listen(process.env.PORT || 3000, () => console.log('PENALTY OUT on port ' + (process.env.PORT || 3000)));
+
+const port = process.env.PORT || 3000;
+srv.listen(port, () => console.log('PENALTY OUT on port ' + port));

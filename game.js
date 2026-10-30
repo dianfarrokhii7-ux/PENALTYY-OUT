@@ -162,19 +162,60 @@ sock.on('start', d => { st = d; $('menu').classList.add('off'); $('hud').classLi
 sock.on('turn', setupTurn);
 sock.on('kx', x => { kxT = x; });
 sock.on('dive', d => startDive(d.dir, d.hi));
-sock.on('shot', d => {
-  ph = 'flight'; B = { mode: 'fly', t: 0, T: d.T, tx: d.tx, ty: d.ty }; kickAnim = .0001; sfx.kick();
-});
-sock.on('result', d => {
+function applyShot(d, quiet = false) {
+  ph = 'flight';
+  const elapsed = d.t0 ? Math.max(0, (Date.now() - d.t0) / 1000) : 0;
+  B = { mode: 'fly', t: Math.min(elapsed, d.T), T: d.T, tx: d.tx, ty: d.ty };
+  kickAnim = .0001;
+  if (d.dive && !dv) startDive(d.dive.dir, d.dive.hi);
+  if (!quiet) sfx.kick();
+}
+function applyResult(d, quiet = false) {
   ph = 'result'; st.score = d.score; st.kicks = d.kicks; st.log = d.log; hud();
   const goal = d.res === 'goal';
   if (B.mode === 'free') {
-    if (goal) { B.vz = -1; B.vx *= .2; } else if (d.res === 'save') { B.vz = 4; B.vx = (Math.random() - .5) * 8; B.vy = 3; } else if (d.res === 'post') { B.vz = 5; B.vy = 2; B.vx *= -.5; }
+    if (goal) { B.vz = -1; B.vx *= .2; }
+    else if (d.res === 'save') { B.vz = 4; B.vx = (Math.random() - .5) * 8; B.vy = 3; }
+    else if (d.res === 'post') { B.vz = 5; B.vy = 2; B.vx *= -.5; }
+  } else {
+    B = { mode: 'rest' };
+    if (d.tx != null && d.ty != null) ball.position.set(d.tx, d.ty, -11);
   }
   cel = { p: goal ? kicker : d.res === 'save' ? keeper : null, t: 0 };
   banner(goal ? 'GOAL!' : d.res === 'save' ? 'SAVED!' : d.res === 'post' ? 'OFF THE POST!' : 'MISS!', goal ? '#2ecc71' : '#e63946');
-  sfx[goal ? 'goal' : d.res === 'save' ? 'save' : 'miss']();
+  if (!quiet) sfx[goal ? 'goal' : d.res === 'save' ? 'save' : 'miss']();
   if (goal) bobBoost = 3;
+}
+sock.on('shot', d => applyShot(d));
+sock.on('result', d => applyResult(d));
+
+// Rebuild the exact current match phase after a temporary disconnect or page refresh.
+sock.on('sync', d => {
+  st = d;
+  if (d.phase === 'lobby') {
+    $('menu').classList.remove('off'); $('home').classList.add('hide'); $('lobby').classList.remove('hide');
+    $('hud').classList.add('hide'); $('pad').classList.add('hide'); $('rc').textContent = d.code;
+    hud();
+    [0, 1].forEach(i => { const e = $('p' + i); e.textContent = (i === me ? 'You' : 'Opponent') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); });
+    return;
+  }
+  if (d.phase === 'end') {
+    $('menu').classList.remove('off'); $('home').classList.add('hide'); $('lobby').classList.add('hide');
+    $('hud').classList.add('hide'); $('pad').classList.add('hide'); $('end').classList.remove('hide');
+    $('endT').textContent = d.winner == null ? 'MATCH ENDED' : `${d.winner === me ? 'YOU WIN' : 'YOU LOSE'}  ${d.score[me]} – ${d.score[1 - me]}`;
+    return;
+  }
+  $('menu').classList.add('off'); $('hud').classList.remove('hide'); $('pad').classList.remove('hide');
+  setupTurn({ ...d, slot: d.slot == null ? d.kicks[d.turn] % 5 : d.slot });
+  if (d.phase === 'idle') { ph = 'idle'; return; }
+  if (d.phase === 'flight' && d.shot) {
+    kx = kxT = d.kx || 0; keeper.position.x = kx;
+    applyShot({ ...d.shot, dive: d.dive }, true);
+  } else if (d.phase === 'result' && d.lastResult) {
+    if (d.shot) ball.position.set(d.shot.tx, d.shot.ty, -11);
+    B = { mode: 'rest' };
+    applyResult(d.lastResult, true);
+  }
 });
 sock.on('end', d => {
   sessionStorage.removeItem('po'); $('hud').classList.add('hide'); $('pad').classList.add('hide'); $('menu').classList.remove('off'); $('home').classList.add('hide'); $('lobby').classList.add('hide'); $('end').classList.remove('hide');
