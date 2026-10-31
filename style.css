@@ -49,3 +49,6 @@ input{background:rgba(255,255,255,.08);border:2px solid var(--chalk);border-radi
 
 .team.off{opacity:.2;pointer-events:none;text-decoration:line-through}
 button:disabled{opacity:.4;cursor:default}
+.team[data-t=MJ].sel{background:linear-gradient(90deg,#111,#8a6d00);color:#ffd23f}
+.namebtn{font-size:16px;opacity:.9;border-style:dashed}
+.teams .team{font-size:14px;padding:10px 6px}

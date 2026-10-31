@@ -24,24 +24,25 @@
   <div id="home" class="screen">
     <h1>PENALTY<span>OUT</span></h1>
     <p class="sub">Two real players. Five kicks each. One keeper to beat.</p>
+    <button id="bName" class="namebtn"></button>
     <button class="big" id="bQuick">Play Online</button>
     <button class="big alt" id="bCreate">Create Room</button>
     <div class="row"><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button class="big alt" id="bJoin">Join Room</button></div>
-    <a class="big alt" id="bFriendly" href="/friendly.html" style="text-decoration:none;display:block">Friendly Match 5v5</a>
+    <a class="big alt" id="bFriendly" href="/friendly.html" style="text-decoration:none;display:block">Friendly Match 6v6</a>
     <div class="row sm"><button id="bSound">Sound: On</button><button id="bFull">Fullscreen</button></div>
     <p id="err"></p>
   </div>
   <div id="lobby" class="screen hide">
     <h2>Room <b id="rc"></b></h2><p class="sub">Share this code with your opponent.</p>
     <div id="pl"><div id="p0"></div><div id="p1"></div></div>
-    <div class="teams hide" id="lt"><button class="team sel" data-t="BAR">BARCELONA</button><button class="team" data-t="RMA">REAL MADRID</button></div>
+    <div class="teams hide" id="lt"><button class="team sel" data-t="BAR">BARCELONA</button><button class="team" data-t="RMA">REAL MADRID</button><button class="team" data-t="MJ">MASHIN JADID</button></div>
     <button class="big" id="bReady" disabled>Ready</button>
     <p class="sub" id="lmsg"></p>
   </div>
   <div id="end" class="screen hide"><h2 id="endT"></h2><button class="big" onclick="location.reload()">Back to menu</button></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
 <script src="/socket.io/socket.io.js"></script>
+<script src="shared.js"></script>
 <script src="game.js"></script>
 </body></html>

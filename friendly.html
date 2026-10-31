@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>PENALTY OUT — Friendly Match 5v5</title>
+<meta name="theme-color" content="#06120c">
+<title>PENALTY OUT — Friendly Match 6v6</title>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="friendly.css"></head>
 <body>
@@ -9,17 +10,25 @@
 <div id="hud" class="hide">
   <div id="board"><div class="tm" id="n0"></div><div class="sc"><b id="s0">0</b>:<b id="s1">0</b></div><div class="tm" id="n1"></div><div id="clk"></div></div>
   <div id="cross" class="hide"></div><div id="who"></div><div id="msg"></div><div id="banner"></div>
+  <button id="bSubs" class="hide">SUBS 5</button>
   <div id="power"><i></i></div><div id="conn"></div>
-  <div id="help">WASD move · Shift sprint · F pass · E cross · Space shoot / header (hold) · C tackle · V switch</div>
+  <div id="help">WASD move · Shift sprint · F pass · E cross · Space shoot / header (hold) · R dribble · C tackle · V switch · B subs</div>
+</div>
+<div id="subs" class="hide panel">
+  <div class="phead"><h3>Substitutions</h3><button id="subClose">✕</button></div>
+  <p class="sub" id="subMsg"></p>
+  <h4>On the pitch</h4><div id="subSlots" class="plist"></div>
+  <h4>Bench</h4><div id="subBench" class="plist"></div>
 </div>
 <div id="fpad" class="hide">
   <div id="joy"><div id="knob"></div></div>
-  <div id="fb"><button data-a="sw">SWITCH</button><button data-a="tk">TACKLE</button><button data-a="cross">CROSS</button><button data-a="pass">PASS</button><button data-a="shoot" class="big">SHOOT</button><button data-a="sprint">SPRINT</button></div>
+  <div id="fb"><button data-a="sw">SWITCH</button><button data-a="tk">TACKLE</button><button data-a="cross">CROSS</button><button data-a="pass">PASS</button><button data-a="dr">DRIBBLE</button><button data-a="shoot" class="big">SHOOT</button><button data-a="sprint">SPRINT</button></div>
 </div>
 <div id="menu">
   <div id="home" class="screen">
-    <h1>FRIENDLY<span>5v5</span></h1>
+    <h1>FRIENDLY<span>6v6</span></h1>
     <p class="sub">Online friendly match. Two real players, AI teammates.</p>
+    <button id="bName" class="namebtn"></button>
     <button class="big" id="bQuick">Play Online</button>
     <button class="big alt" id="bCreate">Create Room</button>
     <div class="row"><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button class="big alt" id="bJoin">Join Room</button></div>
@@ -32,15 +41,16 @@
     <div class="teams hide" id="lt"><button class="team sel" data-t="BAR">BARCELONA</button><button class="team" data-t="RMA">REAL MADRID</button><button class="team" data-t="MJ">MASHIN JADID</button></div>
     <button class="big" id="bReady" disabled>Ready</button><p class="sub" id="lmsg"></p>
   </div>
-  <div id="lineup" class="screen hide">
-    <h2>Line-up</h2><p class="sub">Pick a formation, tap two players to swap positions.</p>
+  <div id="lineup" class="screen hide wide">
+    <h2>Line-up</h2><p class="sub">Pick a formation. Tap two players to swap positions, or a player and a bench player to bring him on.</p>
     <div class="row" id="forms"></div><div id="prev"></div><div id="slots"></div>
+    <h4>Bench</h4><div id="bench" class="plist"></div>
     <button class="big" id="bStart">Start match</button><p class="sub" id="lumsg"></p>
   </div>
-  <div id="end" class="screen hide"><h2 id="endT"></h2><button class="big" onclick="location.href='/friendly.html'">Back to menu</button></div>
+  <div id="end" class="screen hide"><h2 id="endT"></h2><div id="endStats"></div><button class="big" onclick="location.href='/friendly.html'">Back to menu</button></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
 <script src="/socket.io/socket.io.js"></script>
+<script src="shared.js"></script>
 <script src="friendly-game.js"></script>
 </body></html>

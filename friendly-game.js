@@ -1,20 +1,20 @@
 (() => {
 const $ = id => document.getElementById(id);
 const L = 25, W = 15, GW = 2.5, BR = .18;
-const TEAMS = {
-  BAR: { n: 'BARCELONA', r: [['Joan García', 13], ['Lamine Yamal', 19], ['Gerard Martín', 18], ['Raphinha', 11], ['Gavi', 6]] },
-  MJ: { n: 'MASHIN JADID', r: [['Kairo', 1], ['Kalbas', 7], ['Ryven', 10], ['Bati', 9], ['Ishin', 5]] },
-  RMA: { n: 'REAL MADRID', r: [['Thibaut Courtois', 1], ['Antonio Rüdiger', 22], ['Trent Alexander-Arnold', 12], ['Eduardo Camavinga', 6], ['Kylian Mbappé', 10]] }
-};
+const NS = 6, SQ = POF.SQUADS, TEAMS = {};
+POF.TEAM_KEYS.forEach(k => TEAMS[k] = { n: SQ[k].n, r: SQ[k].r });
 const FORMS = {
-  '2-1-1': [[-.92, 0], [-.55, -.45], [-.55, .45], [-.1, 0], [.45, 0]],
-  '1-2-1': [[-.92, 0], [-.55, 0], [-.1, -.55], [-.1, .55], [.45, 0]],
-  '1-1-2': [[-.92, 0], [-.55, 0], [-.15, 0], [.45, -.4], [.45, .4]]
+  '2-2-1': [[-.92, 0], [-.55, -.45], [-.55, .45], [-.1, -.5], [-.1, .5], [.45, 0]],
+  '2-1-2': [[-.92, 0], [-.55, -.45], [-.55, .45], [-.1, 0], [.45, -.4], [.45, .4]],
+  '3-1-1': [[-.92, 0], [-.55, -.6], [-.55, 0], [-.55, .6], [-.1, 0], [.45, 0]],
+  '1-3-1': [[-.92, 0], [-.55, 0], [-.1, -.6], [-.1, 0], [-.1, .6], [.45, 0]],
+  '1-2-2': [[-.92, 0], [-.55, 0], [-.1, -.5], [-.1, .5], [.45, -.4], [.45, .4]]
 };
+const DEF_FORM = '2-2-1', defOrder = () => Array.from({ length: NS }, (_, k) => k);
 const lab = f => (f[0] < -.8 ? 'GK' : f[0] < -.3 ? 'DEF' : f[0] > .3 ? 'FWD' : 'MID') + (Math.abs(f[1]) > .3 ? (f[1] < 0 ? ' L' : ' R') : '');
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const sock = io('/friendly');
-let me = -1, room = null, myTeam = 'BAR', snd = true, lu = { form: '2-1-1', order: [0, 1, 2, 3, 4] }, luSel = -1, luInit = false, G = null;
+let whoE = null, me = -1, room = null, myTeam = 'BAR', snd = true, lu = { form: DEF_FORM, order: defOrder() }, sel = null, luInit = false, G = null, curLu = null, subSel = -1;
 
 /* ---------- audio ---------- */
 let ac, cg, cf;
@@ -40,15 +40,15 @@ function crowd(level, freq, dur) {
 
 /* ---------- scene ---------- */
 const R = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true, powerPreference: 'high-performance' });
-const MOB = matchMedia('(pointer:coarse)').matches, SH = !MOB;
-R.setPixelRatio(Math.min(devicePixelRatio, MOB ? 1.25 : 1.75)); R.shadowMap.enabled = SH; R.shadowMap.type = THREE.PCFSoftShadowMap;
+const MOB = matchMedia('(pointer:coarse)').matches, SH = true;
+const QL = POF.Quality(R, Math.min(devicePixelRatio || 1, 2), MOB ? 1 : 1.25); R.shadowMap.enabled = SH; R.shadowMap.type = MOB ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a1830); scene.fog = new THREE.Fog(0x0a1830, 50, 120);
 const cam = new THREE.PerspectiveCamera(48, 1, .1, 250);
 const resize = () => { R.setSize(innerWidth, innerHeight, false); cam.aspect = innerWidth / innerHeight; cam.fov = cam.aspect < 1 ? 70 : 48; cam.updateProjectionMatrix(); };
 addEventListener('resize', resize); resize();
 scene.add(new THREE.HemisphereLight(0xdde8ff, 0x2a4a2a, .95));
 const sun = new THREE.DirectionalLight(0xffffff, .75); sun.position.set(10, 40, 15); scene.add(sun); sun.castShadow = SH;
-if (SH) { sun.shadow.mapSize.set(2048, 2048); const sc = sun.shadow.camera; sc.left = -34; sc.right = 34; sc.top = 24; sc.bottom = -24; sc.near = 5; sc.far = 90; sun.shadow.bias = -.0006; scene.add(sun.target); }
+if (SH) { sun.shadow.mapSize.set(MOB ? 1024 : 2048, MOB ? 1024 : 2048); const sc = sun.shadow.camera; sc.left = -34; sc.right = 34; sc.top = 24; sc.bottom = -24; sc.near = 5; sc.far = 90; sun.shadow.bias = -.0006; scene.add(sun.target); }
 const mat = (c, o) => new THREE.MeshLambertMaterial({ color: c, ...o });
 
 const glowTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.3, 'rgba(255,255,255,.4)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
@@ -65,7 +65,7 @@ const glowTex = (() => { const c = document.createElement('canvas'); c.width = c
   x.beginPath(); x.moveTo(X(0), Z(-W)); x.lineTo(X(0), Z(W)); x.stroke(); x.beginPath(); x.arc(X(0), Z(0), 4 * k, 0, 7); x.stroke();
   [-1, 1].forEach(s => { x.strokeRect(X(s > 0 ? L - 8 : -L), Z(-7), 8 * k, 14 * k); x.strokeRect(X(s > 0 ? L - 3 : -L), Z(-4), 3 * k, 8 * k); x.fillStyle = '#fff'; x.beginPath(); x.arc(X(s * (L - 6)), Z(0), 5, 0, 7); x.fill(); x.beginPath(); x.arc(X(s * (L - 6)), Z(0), 4 * k, s > 0 ? Math.PI - 1.0 : -1.0 + 0, s > 0 ? Math.PI + 1.0 : 1.0); x.stroke(); });
   x.fillStyle = '#fff'; x.beginPath(); x.arc(X(0), Z(0), 5, 0, 7); x.fill();
-  const t = new THREE.CanvasTexture(c); t.anisotropy = 8;
+  const t = new THREE.CanvasTexture(c); t.anisotropy = Math.min(8, R.capabilities.getMaxAnisotropy());
   const m = new THREE.Mesh(new THREE.PlaneGeometry(56, 36), new THREE.MeshLambertMaterial({ map: t, color: 0x9c9c9c })); m.rotation.x = -Math.PI / 2; m.receiveShadow = SH; scene.add(m);
   const g = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat(0x1c4a24)); g.rotation.x = -Math.PI / 2; g.position.y = -.05; scene.add(g);
   [-1, 1].forEach(sx => [-1, 1].forEach(sz => {
@@ -133,9 +133,8 @@ for (let q = 0; q < 4; q++) {
 });
 
 /* ball */
-const ball = new THREE.Group(), ballFb = new THREE.Mesh(new THREE.SphereGeometry(BR, 14, 10), mat(0xffffff)); ballFb.castShadow = SH; ball.add(ballFb); scene.add(ball);
+const ball = new THREE.Group(), ballFb = POF.classicBall(THREE, BR); ballFb.castShadow = SH; ball.add(ballFb); scene.add(ball);
 const bsh = new THREE.Mesh(new THREE.CircleGeometry(1, 14), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .35, depthWrite: false })); bsh.rotation.x = -Math.PI / 2; bsh.visible = !SH; scene.add(bsh);
-if (THREE.GLTFLoader) new THREE.GLTFLoader().load('ball.glb', gl => { gl.scene.scale.setScalar(BR / .1132); ball.remove(ballFb); ball.add(gl.scene); gl.scene.traverse(o => { if (o.isMesh) o.castShadow = SH; }); }, undefined, () => {});
 
 /* ---------- players ---------- */
 function kitTex(team, num, gk) {
@@ -178,13 +177,17 @@ const shadowGeo = new THREE.CircleGeometry(.45, 12), ring = new THREE.Mesh(new T
 ring.rotation.x = -Math.PI / 2; ring.position.y = .03; scene.add(ring);
 const arrow = new THREE.Mesh(new THREE.ConeGeometry(.16, .32, 8), new THREE.MeshBasicMaterial({ color: 0xffd23f })); arrow.rotation.x = Math.PI; scene.add(arrow);
 let ents = [];
+function mkEnt(team, luA, t, s, old) {
+  const key = team[t], q = TEAMS[key].r[luA[t].order[s]], g = makePlayer(key, q.num, s === 0);
+  const sh = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .3, depthWrite: false })); sh.rotation.x = -Math.PI / 2; sh.position.y = .02;
+  g.traverse(o => { if (o.isMesh) o.castShadow = SH; }); scene.add(g, sh);
+  const e = { g, sh, t, s, q, name: q.n, num: q.num, x: 0, z: 0, a: 0, tx: 0, tz: 0, ta: 0, st: 0, red: 0, sp: 0, ph: Math.random() * 6, kt: 0, pst: 0, d5: 0 };
+  if (old) { Object.assign(e, { x: old.x, z: old.z, a: old.a, tx: old.tx, tz: old.tz, ta: old.ta, st: old.st, red: old.red }); scene.remove(old.g); scene.remove(old.sh); }
+  return e;
+}
 function buildPlayers(team, luA) {
-  ents.forEach(e => { scene.remove(e.g); scene.remove(e.sh); }); ents = [];
-  for (let t = 0; t < 2; t++) for (let s = 0; s < 5; s++) {
-    const key = team[t], [name, num] = TEAMS[key].r[luA[t].order[s]], g = makePlayer(key, num, s === 0);
-    const sh = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .3, depthWrite: false })); sh.rotation.x = -Math.PI / 2; sh.position.y = .02;
-    g.traverse(o => { if (o.isMesh) o.castShadow = SH; }); scene.add(g, sh); ents.push({ g, sh, t, s, name, num, x: 0, z: 0, a: 0, tx: 0, tz: 0, ta: 0, st: 0, red: 0, sp: 0, ph: Math.random() * 6, kt: 0, pst: 0 });
-  }
+  ents.forEach(e => { scene.remove(e.g); scene.remove(e.sh); }); ents = []; curLu = JSON.parse(JSON.stringify(luA));
+  for (let t = 0; t < 2; t++) for (let s = 0; s < NS; s++) ents.push(mkEnt(team, curLu, t, s));
 }
 function animate(e, dt, B, celeb) {
   const P = e.g.p, k = Math.min(1, e.sp / 6.5); e.ph += dt * (2 + e.sp * 1.45); const s = Math.sin(e.ph), c = Math.cos(e.ph);
@@ -199,6 +202,8 @@ function animate(e, dt, B, celeb) {
   if (e.s === 0 && Math.hypot(B.x - e.x, B.z - e.z) < 2.8 && B.y > .35) { P.al.rotation.z = -2.5; P.ar.rotation.z = 2.5; P.al.rotation.x = P.ar.rotation.x = -.3; P.body.rotation.z = clamp((B.z - e.z) * .1, -.4, .4) * Math.sign(Math.cos(e.a) || 1); }
   if (e.st === 4) { e.g.position.y = .45; P.body.rotation.x = -.25; P.al.rotation.z = -1.2; P.ar.rotation.z = 1.2; P.hl.rotation.x = .3; P.hr.rotation.x = -.3; }
   if (e.st === 3) { const sg = Math.sign(e.vz || 0), lx = -Math.sin(e.g.rotation.y) * sg; e.g.position.y = .35; P.body.rotation.z = -(Math.sign(lx) || 1) * 1.25 * (sg ? 1 : 0); P.al.rotation.z = -2.6; P.ar.rotation.z = 2.6; }
+  if (e.st === 5) { e.d5 += dt; const w = Math.sin(e.d5 * 20); P.body.rotation.z = w * .5; P.body.rotation.x = .3; P.hl.rotation.x = w * 1.1; P.hr.rotation.x = -w * 1.1; P.al.rotation.z = -.9; P.ar.rotation.z = .9; } else e.d5 = 0;
+  if (e.st === 6) { e.g.position.y = .05; P.body.rotation.x = .7; P.al.rotation.z = -1.4; P.ar.rotation.z = 1.4; P.hl.rotation.x = .5; P.hr.rotation.x = -.7; }
   if (celeb === e.t) { e.g.position.y = Math.abs(Math.sin(e.ph * 2)) * .35; P.al.rotation.z = -2.6; P.ar.rotation.z = 2.6; }
   e.pst = e.st;
 }
@@ -222,10 +227,10 @@ function camMode() {
 }
 function press(a) {
   if (S && S.rs && S.rs.k === 'penalty' && S.pn && S.rs.t !== me) { if (a === 'shoot' || a === 'pass') { const [sx, sy] = stick(); act('dive', 0, { dir: sx > .3 ? 1 : sx < -.3 ? -1 : 0, hi: sy > .3 }); } return; }
-  if (a === 'pass') act('pass'); else if (a === 'cross') act('cross'); else if (a === 'tk') act('tk'); else if (a === 'sw') act('sw'); else if (a === 'shoot') startCharge(); else if (a === 'sprint') spBtn = true; }
+  if (a === 'pass') act('pass'); else if (a === 'cross') act('cross'); else if (a === 'tk') act('tk'); else if (a === 'dr') act('dr'); else if (a === 'sw') act('sw'); else if (a === 'shoot') startCharge(); else if (a === 'sprint') spBtn = true; }
 function unpress(a) { if (a === 'shoot') release(); else if (a === 'sprint') spBtn = false; }
-const KM = { KeyE: 'cross', KeyU: 'cross', KeyF: 'pass', KeyJ: 'pass', Space: 'shoot', KeyK: 'shoot', KeyC: 'tk', KeyL: 'tk', KeyV: 'sw', Tab: 'sw' };
-addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (KM[e.code] || e.code.startsWith('Arrow')) e.preventDefault(); if (e.repeat) return; keys[e.code] = 1; if (KM[e.code]) press(KM[e.code]); });
+const KM = { KeyR: 'dr', KeyI: 'dr', KeyE: 'cross', KeyU: 'cross', KeyF: 'pass', KeyJ: 'pass', Space: 'shoot', KeyK: 'shoot', KeyC: 'tk', KeyL: 'tk', KeyV: 'sw', Tab: 'sw' };
+addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (KM[e.code] || e.code.startsWith('Arrow')) e.preventDefault(); if (e.repeat) return; keys[e.code] = 1; if (e.code === 'KeyB') toggleSubs(); if (KM[e.code]) press(KM[e.code]); });
 addEventListener('keyup', e => { keys[e.code] = 0; if (KM[e.code]) unpress(KM[e.code]); });
 document.querySelectorAll('#fb button').forEach(b => { const a = b.dataset.a; b.addEventListener('pointerdown', e => { e.preventDefault(); b.classList.add('p'); press(a); }); ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => b.addEventListener(n, e => { e.preventDefault(); if (b.classList.contains('p')) { b.classList.remove('p'); unpress(a); } })); });
 const joyEl = $('joy'), knob = $('knob');
@@ -249,43 +254,54 @@ sock.on('joined', d => { me = d.i; sessionStorage.setItem('pof', JSON.stringify(
 function show(id) { ['home', 'lobby', 'lineup', 'end'].forEach(s => $(s).classList.toggle('hide', s !== id)); }
 sock.on('room', d => {
   room = d; if (me < 0) return;
-  [0, 1].forEach(i => { const e = $('p' + i); e.textContent = (i === me ? 'You' : 'Opponent') + (d.on[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.on[i]); });
-  if (d.ph === 'lineup') { if (!luInit) { luInit = true; lu = { form: '2-1-1', order: [0, 1, 2, 3, 4] }; luSel = -1; show('lineup'); renderLU(); } $('lumsg').textContent = d.rdy[me] ? 'Waiting for opponent…' : ''; $('bStart').disabled = !!d.rdy[me]; return; }
+  [0, 1].forEach(i => { const e = $('p' + i), nm = (d.names && d.names[i]) || (i === me ? 'You' : 'Opponent'); e.textContent = nm + (i === me ? ' (you)' : '') + (d.on[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.on[i]); });
+  if (d.ph === 'lineup') { if (!luInit) { luInit = true; lu = { form: DEF_FORM, order: defOrder() }; sel = null; show('lineup'); renderLU(); } $('lumsg').textContent = d.rdy[me] ? 'Waiting for opponent…' : ''; $('bStart').disabled = !!d.rdy[me]; return; }
   if (d.ph !== 'lobby') return;
   const both = d.on[0] && d.on[1], mine = d.rdy[me], opp = d.rdy[1 - me] ? d.team[1 - me] : null;
   if (opp && myTeam === opp && !mine) { myTeam = Object.keys(TEAMS).find(k => k !== opp); sock.emit('team', myTeam); }
   $('lt').classList.toggle('hide', !both);
   document.querySelectorAll('.team').forEach(b => { b.classList.toggle('sel', b.dataset.t === myTeam); b.classList.toggle('off', b.dataset.t === opp || !!mine); });
   $('bReady').disabled = !both || !!mine;
-  $('lmsg').textContent = !both ? 'Waiting for your opponent to join…' : mine ? 'Waiting for your opponent…' : opp ? 'Opponent picked ' + TEAMS[opp].n + '. Choose yours and press Ready.' : 'Both connected. Choose your team and press Ready.';
+  const on = (d.names && d.names[1 - me]) || 'Opponent';
+  $('lmsg').textContent = !both ? 'Waiting for your opponent to join…' : mine ? 'Waiting for ' + on + '…' : opp ? on + ' picked ' + TEAMS[opp].n + '. Choose yours and press Ready.' : 'Both connected. Choose your team and press Ready.';
 });
 const getF = l => l.form === 'custom' ? l.pos : FORMS[l.form];
 function drawPrev() { $('prev').innerHTML = getF(lu).map((f, i) => `<i class="${i ? '' : 'gk'}" style="left:${(f[0] + 1) / 2 * 100}%;top:${(f[1] + 1) / 2 * 100}%">${i ? i : 'GK'}</i>`).join(''); }
+const statLine = q => q.gk ? `GK ${q.gk}` : `PAC ${q.pac} · SHO ${q.sho} · PAS ${q.pas} · DRI ${q.dri} · DEF ${q.def}`;
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function renderLU() {
-  const my = room ? room.team[me] : myTeam, F = getF(lu);
+  const my = room ? room.team[me] : myTeam, F = getF(lu), sq = SQ[my].r, used = new Set(lu.order);
   $('forms').innerHTML = Object.keys(FORMS).concat('custom').map(f => `<button data-f="${f}" class="${f === lu.form ? 'sel' : ''}">${f === 'custom' ? 'CUSTOM' : f}</button>`).join('');
-  $('slots').innerHTML = F.map((f, i) => { const [n, num] = TEAMS[my].r[lu.order[i]]; return `<div class="srow"><button data-s="${i}" class="${i === luSel ? 'sel' : ''} ${i === 0 ? 'lock' : ''}"><span>${lab(f)}</span><span>${n} #${num}</span></button>${lu.form === 'custom' && i ? `<span class="sl"><input type="range" data-s="${i}" data-k="0" min="-80" max="70" value="${Math.round(f[0] * 100)}"><input type="range" data-s="${i}" data-k="1" min="-80" max="80" value="${Math.round(f[1] * 100)}"></span>` : ''}</div>`; }).join('');
+  $('slots').innerHTML = F.map((f, i) => { const q = sq[lu.order[i]]; return `<div class="srow"><button data-s="${i}" class="${sel && sel.k === 's' && sel.i === i ? 'sel' : ''} ${i === 0 ? 'lock' : ''}"><span>${lab(f)}</span><span>${esc(q.n)} #${q.num}</span><b class="ov">${POF.ovr(q)}</b></button><small class="stl">${statLine(q)}</small>${lu.form === 'custom' && i ? `<span class="sl"><input type="range" data-s="${i}" data-k="0" min="-80" max="70" value="${Math.round(f[0] * 100)}"><input type="range" data-s="${i}" data-k="1" min="-80" max="80" value="${Math.round(f[1] * 100)}"></span>` : ''}</div>`; }).join('');
+  $('bench').innerHTML = sq.map((q, i) => i && !used.has(i) ? `<button data-b="${i}" class="${sel && sel.k === 'b' && sel.i === i ? 'sel' : ''}"><span>${esc(q.n)} #${q.num}</span><b class="ov">${POF.ovr(q)}</b><small class="stl">${statLine(q)}</small></button>` : '').join('') || '<p class="sub">No bench players</p>';
   drawPrev();
   document.querySelectorAll('#forms button').forEach(b => b.onclick = () => {
     if (b.dataset.f === 'custom') { if (lu.form !== 'custom') lu.pos = FORMS[lu.form].map(q => q.slice()); lu.form = 'custom'; } else { lu.form = b.dataset.f; delete lu.pos; }
     sock.emit('lineup', lu); renderLU();
   });
-  document.querySelectorAll('#slots button').forEach(b => b.onclick = () => {
-    const i = +b.dataset.s; if (i === 0) return; if (luSel < 0) luSel = i; else { if (luSel !== i) { const o = lu.order; [o[luSel], o[i]] = [o[i], o[luSel]]; sock.emit('lineup', lu); } luSel = -1; } renderLU();
-  });
+  const pick = (k, i) => {   // tap a slot / bench player, then another: swap two slots, or bring a bench player on
+    if (!sel || sel.k === k && k === 'b') { sel = sel && sel.i === i ? null : { k, i }; return renderLU(); }
+    if (sel.k === 's' && k === 's') { if (sel.i !== i) { const o = lu.order; [o[sel.i], o[i]] = [o[i], o[sel.i]]; } }
+    else if (sel.k !== k) { const si = k === 's' ? i : sel.i, bi = k === 'b' ? i : sel.i; lu.order[si] = bi; }
+    sel = null; sock.emit('lineup', lu); renderLU();
+  };
+  document.querySelectorAll('#slots button').forEach(b => b.onclick = () => { const i = +b.dataset.s; if (i === 0) return; pick('s', i); });
+  document.querySelectorAll('#bench button').forEach(b => b.onclick = () => pick('b', +b.dataset.b));
   document.querySelectorAll('#slots input').forEach(inp => { inp.oninput = () => { lu.pos[+inp.dataset.s][+inp.dataset.k] = inp.value / 100; drawPrev(); }; inp.onchange = () => sock.emit('lineup', lu); });
 }
 $('bStart').onclick = () => { sock.emit('lineup', lu); sock.emit('ready'); $('bStart').disabled = true; };
 sock.on('start', d => {
   room = { ...(room || {}), team: d.team }; buildPlayers(d.team, d.lu); G = d;
   $('menu').classList.add('off'); $('hud').classList.remove('hide'); if (matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window) { $('fpad').classList.remove('hide'); $('help').classList.add('hide'); }
-  [0, 1].forEach(i => $('n' + i).textContent = TEAMS[d.team[i]].n + (i === me ? ' (YOU)' : '')); crowdStart();
+  [0, 1].forEach(i => { const el = $('n' + i), nm = (room && room.names && room.names[i]) || ''; el.textContent = TEAMS[d.team[i]].n; if (nm) { const sm = document.createElement('small'); sm.textContent = nm + (i === me ? ' (you)' : ''); el.appendChild(sm); } });
+  $('bSubs').classList.remove('hide'); crowdStart();
 });
 sock.on('snap', s => {
   S = s; flip = s.fl; Bl.o = s.b[3]; bt.x = s.b[0]; bt.y = s.b[1]; bt.z = s.b[2];
   s.p.forEach((p, i) => { const e = ents[i]; if (!e) return; e.tx = p[0]; e.tz = p[1]; e.ta = p[2]; e.st = p[3]; e.red = p[4]; e.sp = p[5]; e.vz = p[7] || 0; });
   $('s0').textContent = s.s[0]; $('s1').textContent = s.s[1]; $('clk').textContent = `${s.h === 1 ? '1st' : '2nd'}  ${Math.floor(s.c / 60)}:${String(s.c % 60).padStart(2, '0')}`;
-  const ce = ents[s.k[me]]; $('who').textContent = ce ? `${ce.name}  #${ce.num}` : '';
+  const ce = ents[s.k[me]]; if (ce && ce !== whoE) { whoE = ce; $('who').innerHTML = `${esc(ce.name)} #${ce.num} <b>${POF.ovr(ce.q)}</b><small>${statLine(ce.q)}</small>`; } else if (!ce) $('who').textContent = '';
+  subRefresh(s);
   $('msg').textContent = s.ph === 'dead' && s.rs ? (s.rs.k === 'penalty' ? (s.rs.t === me ? (s.pn && s.pn[0] === 0 ? 'PENALTY — aim with stick / WASD, hold SHOOT, release to kick' : '') : 'PENALTY — you are the goalkeeper: move left/right, press SHOOT to dive toward the stick') : `${RS[s.rs.k]} — ${s.rs.t === me ? 'YOU (pass / shoot)' : 'opponent'}`) : '';
   if (chargeT) $('power').firstChild.style.width = clamp((performance.now() - chargeT) / 900, 0, 1) * 100 + '%';
   if (room && room.on) $('conn').textContent = room.on[1 - me] ? '' : 'Opponent disconnected — AI is playing for them';
@@ -299,25 +315,50 @@ sock.on('ev', list => list.forEach(e => {
   else if (e.k === 'goal') { startRipple(); celeb = e.t; celebT = 3.2; banner(e.t === me ? 'GOAL!' : 'GOAL FOR OPPONENT', e.t === me ? '#2ecc71' : '#e63946'); [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)); crowd(.45, 1000, 4.5); }
   else if (e.k === 'foul') { beep(2400, .5, 'square', .06); banner(e.card === 'r' ? 'RED CARD' : e.card === 'y' ? 'YELLOW CARD' : e.pen ? 'FOUL — PENALTY' : 'FOUL', e.card === 'r' ? '#e63946' : '#ffd23f'); crowd(.2, 450, 2.5); }
   else if (e.k === 'penres') { if (e.res !== 'goal') banner(e.res === 'save' ? 'SAVED!' : e.res === 'post' ? 'OFF THE POST!' : 'MISSED!', '#e63946'); }
+  else if (e.k === 'dribble') { beep(e.ok ? 660 : 130, e.ok ? .12 : .2, e.ok ? 'triangle' : 'sawtooth', .12); if (e.t === me) banner(e.ok ? 'SKILL MOVE!' : 'HEAVY TOUCH', e.ok ? '#2ecc71' : '#e63946'); }
+  else if (e.k === 'tfail') beep(120, .15, 'sawtooth', .08);
+  else if (e.k === 'sub') { if (curLu) { curLu[e.t].order[e.slot] = e.idx; const i = e.t * NS + e.slot; ents[i] = mkEnt(G.team, curLu, e.t, e.slot, ents[i]); whoE = null; subSel = -1; if (!$('subs').classList.contains('hide')) renderSubs(); } banner('SUBSTITUTION', '#ffd23f'); beep(880, .15, 'triangle', .1); }
   else if (e.k === 'head' || e.k === 'volley') beep(260, .1, 'triangle', .25);
   else if (e.k === 'cross') beep(420, .25, 'triangle', .15);
   else if (e.k === 'post') { beep(1100, .2, 'square', .12); crowd(.2, 900, 1.5); }
   else if (e.k === 'half') { banner('HALF TIME', '#ffd23f'); beep(2000, .8, 'square', .06); }
-  else if (e.k === 'end') { $('hud').classList.add('hide'); $('fpad').classList.add('hide'); $('menu').classList.remove('off'); show('end'); sessionStorage.removeItem('pof'); const a = e.score[me], b = e.score[1 - me]; $('endT').textContent = `${a > b ? 'YOU WIN' : a < b ? 'YOU LOSE' : 'DRAW'}  ${a} – ${b}`; }
+  else if (e.k === 'end') { $('hud').classList.add('hide'); $('fpad').classList.add('hide'); $('menu').classList.remove('off'); show('end'); sessionStorage.removeItem('pof'); const a = e.score[me], b = e.score[1 - me]; $('endT').textContent = `${a > b ? 'YOU WIN' : a < b ? 'YOU LOSE' : 'DRAW'}  ${a} – ${b}`; $('subs').classList.add('hide'); $('bSubs').classList.add('hide'); showStats(e.st); }
 }));
 
 /* ---------- menu ---------- */
 document.querySelectorAll('.team').forEach(b => b.onclick = () => { myTeam = b.dataset.t; sock.emit('team', myTeam); document.querySelectorAll('.team').forEach(x => x.classList.toggle('sel', x === b)); });
 const fresh = () => { sessionStorage.removeItem('pof'); luInit = false; };
-$('bQuick').onclick = () => { fresh(); sock.emit('quick'); }; $('bCreate').onclick = () => { fresh(); sock.emit('create'); }; $('bJoin').onclick = () => { fresh(); sock.emit('join', $('code').value); };
+const nm = () => ({ name: POF.name() });
+$('bQuick').onclick = () => { fresh(); sock.emit('quick', nm()); }; $('bCreate').onclick = () => { fresh(); sock.emit('create', nm()); }; $('bJoin').onclick = () => { fresh(); sock.emit('join', { code: $('code').value, ...nm() }); };
+const nameBtn = () => { $('bName').textContent = 'Player: ' + POF.name() + '  ✎'; };
+$('bName').onclick = () => POF.askName(true, nameBtn); POF.askName(false, nameBtn);
 $('bReady').onclick = () => { sock.emit('team', myTeam); sock.emit('ready'); $('bReady').disabled = true; };
 $('bSound').onclick = () => { snd = !snd; if (cg) cg.gain.value = snd ? .05 : 0; $('bSound').textContent = 'Sound: ' + (snd ? 'On' : 'Off'); };
 $('bFull').onclick = () => { const d = document.documentElement; document.fullscreenElement ? document.exitFullscreen() : (d.requestFullscreen || d.webkitRequestFullscreen || (() => {})).call(d); };
 
+/* ---------- substitutions (only while play is stopped) + match stats ---------- */
+const canSub = () => S && (S.ph === 'dead' || S.ph === 'goal') && !S.pn;
+function toggleSubs() { if (!G) return; const p = $('subs'); if (p.classList.contains('hide')) { renderSubs(); p.classList.remove('hide'); } else p.classList.add('hide'); }
+function subRefresh(s) { const left = 5 - (s.sb ? s.sb[me] : 0); $('bSubs').textContent = `SUBS ${left}`; $('bSubs').classList.toggle('off', !canSub() || left <= 0); if (!$('subs').classList.contains('hide')) renderSubs(); }
+function renderSubs() {
+  if (!curLu || !G) return; const my = G.team[me], sq = SQ[my].r, o = curLu[me].order, used = new Set(o), left = 5 - (S && S.sb ? S.sb[me] : 0), ok = canSub() && left > 0;
+  $('subMsg').textContent = ok ? `Tap a player on the pitch, then a bench player. Substitutions left: ${left}` : left <= 0 ? 'No substitutions left' : 'Substitutions are only possible while play is stopped (throw-in, free kick, goal…)';
+  $('subSlots').innerHTML = o.map((idx, s) => { if (!s) return ''; const q = sq[idx], red = ents[me * NS + s] && ents[me * NS + s].red; return `<button data-s="${s}" ${red || !ok ? 'disabled' : ''} class="${subSel === s ? 'sel' : ''}"><span>${esc(q.n)} #${q.num}</span><b class="ov">${POF.ovr(q)}</b></button>`; }).join('');
+  $('subBench').innerHTML = sq.map((q, i) => i && !used.has(i) ? `<button data-b="${i}" ${ok && subSel > 0 ? '' : 'disabled'}><span>${esc(q.n)} #${q.num}</span><b class="ov">${POF.ovr(q)}</b><small class="stl">${statLine(q)}</small></button>` : '').join('');
+  document.querySelectorAll('#subSlots button').forEach(b => b.onclick = () => { subSel = subSel === +b.dataset.s ? -1 : +b.dataset.s; renderSubs(); });
+  document.querySelectorAll('#subBench button').forEach(b => b.onclick = () => { if (subSel > 0) { sock.emit('sub', { slot: subSel, bench: +b.dataset.b }); subSel = -1; } });
+}
+$('bSubs').onclick = toggleSubs; $('subClose').onclick = () => $('subs').classList.add('hide');
+function showStats(st) {
+  if (!st) { $('endStats').innerHTML = ''; return; }
+  const a = st[me], b = st[1 - me], row = (n, x, y) => `<div class="strow"><b>${x}</b><span>${n}</span><b>${y}</b></div>`;
+  $('endStats').innerHTML = row('Possession %', a.poss, b.poss) + row('Shots', a.shots, b.shots) + row('Passes', a.passes, b.passes) + row('Tackles', a.tackles, b.tackles) + row('Fouls', a.fouls, b.fouls) + row('Dribbles won', `${a.drOk}/${a.dr}`, `${b.drOk}/${b.dr}`);
+}
+
 /* ---------- loop ---------- */
 let last = performance.now(), frame = 0;
 function loop(now) {
-  requestAnimationFrame(loop); const dt = Math.min((now - last) / 1000, .05); last = now; frame++;
+  requestAnimationFrame(loop); QL.tick(now); const dt = Math.min((now - last) / 1000, .05); last = now; frame++;
   const dmv = (me === 1 ? -1 : 1) * (flip ? -1 : 1);
   const cm = camMode(); if (G && S) sendInput(now, dmv, cm);
   groups.forEach((g, i) => { g.position.y = Math.max(0, Math.sin(now / 1000 * (celebT > 0 ? 9 : 2.2) + i * 1.7)) * (celebT > 0 ? .45 : .06); });

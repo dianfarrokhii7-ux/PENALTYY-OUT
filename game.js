@@ -1,9 +1,8 @@
 (() => {
 const $ = id => document.getElementById(id);
-const TEAMS = {
-  BAR: { n: 'BARCELONA', c: 0xa50044, c2: 0x004d98, r: ['Joan García', 'Lamine Yamal', 'Gerard Martín', 'Raphinha', 'Gavi'] },
-  RMA: { n: 'REAL MADRID', c: 0xf2f2f2, c2: 0xf2f2f2, r: ['Thibaut Courtois', 'Antonio Rüdiger', 'Trent Alexander-Arnold', 'Eduardo Camavinga', 'Kylian Mbappé'] }
-};
+const SQ = POF.SQUADS, KIT = { BAR: [0xa50044, 0x004d98], RMA: [0xf2f2f2, 0xf2f2f2], MJ: [0x111111, 0xd4a017] }, TEAMS = {};
+POF.TEAM_KEYS.forEach(k => TEAMS[k] = { n: SQ[k].n, c: KIT[k][0], c2: KIT[k][1], r: SQ[k].r.slice(0, 6).map(p => p.n) });   // r[0] = goalkeeper, r[1..5] = penalty takers
+const pname = (d, i) => (d && d.names && d.names[i]) || (i === me ? 'You' : 'Opponent');
 let myTeam = 'BAR', me = -1, st = null, ph = 'idle', role = 'shooter', snd = true;
 const sock = io(), keys = {};
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -40,7 +39,7 @@ const sfx = { whistle: () => { beep(2400, .35, 'square', .06); }, kick: () => be
 /* ---------- three.js scene ---------- */
 const canvas = $('c');
 const R = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-R.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+const QL = POF.Quality(R, Math.min(devicePixelRatio || 1, 2), 1);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a1830); scene.fog = new THREE.Fog(0x0a1830, 45, 110);
 const cam = new THREE.PerspectiveCamera(55, 1, .1, 200);
@@ -116,11 +115,10 @@ function person(shirt, shorts) {
   g.parts = { L: limb(-.13, .95, .18, .9, shorts), R: limb(.13, .95, .18, .9, shorts), AL: limb(-.34, 1.5, .13, .6, shirt), AR: limb(.34, 1.5, .13, .6, shirt) };
   g.add(box(.5, .65, .28, shirt, 1.25), head, g.parts.L, g.parts.R, g.parts.AL, g.parts.AR); return g;
 }
-const BR = .18, RUN = .5, ball = new THREE.Group(), ballFb = new THREE.Mesh(new THREE.SphereGeometry(BR, 16, 12), mat(0xffffff));
+const BR = .18, RUN = .5, ball = new THREE.Group(), ballFb = POF.classicBall(THREE, BR);
 ball.add(ballFb); scene.add(ball);
 const bshadow = new THREE.Mesh(new THREE.CircleGeometry(1, 16), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .35, depthWrite: false }));
 bshadow.rotation.x = -Math.PI / 2; scene.add(bshadow);
-if (THREE.GLTFLoader) new THREE.GLTFLoader().load('ball.glb', gl => { const m = gl.scene; m.scale.setScalar(BR / .1132); ball.remove(ballFb); ball.add(m); }, undefined, () => {});
 let kicker = null, keeper = null, kx = 0, kxT = 0, dv = null, cel = null, B = { mode: 'rest' }, kickAnim = 0;
 let ax = 0, ay = .35, pw = 0, charging = false;
 
@@ -132,7 +130,7 @@ function setupTurn(d) {
   keeper = person(0xd7ff3a, 0x111111); keeper.position.set(0, 0, -11); scene.add(keeper);
   kx = kxT = 0; dv = null; cel = null; ax = 0; ay = .35; pw = 0; charging = false; B = { mode: 'rest' }; kickAnim = 0; ball.position.set(0, BR, 0);
   const slot = d.slot, ot = TEAMS[st.team[1 - st.turn]];
-  $('taker').textContent = `${tt.r[slot < 4 ? slot + 1 : 0]}  vs  ${ot.r[0]} (GK)`;
+  $('taker').textContent = `${tt.r[slot % 5 + 1]}  vs  ${ot.r[0]} (GK)`;
   $('role').textContent = role === 'shooter' ? 'YOUR PENALTY — aim, hold SPACE to charge, release to shoot' : 'DEFEND — move with A / D, then dive with ← → once the ball is struck';
   $('cross').classList.toggle('hide', role !== 'shooter'); $('power').classList.toggle('hide', role !== 'shooter'); $('power').firstChild.style.width = '0';
   padRole(); hud(); sfx.whistle();
@@ -143,7 +141,7 @@ function padRole() {
 function hud() {
   if (!st) return;
   [0, 1].forEach(i => {
-    $('n' + i).textContent = TEAMS[st.team[i]].n + (i === me ? ' (YOU)' : ''); $('s' + i).textContent = st.score[i];
+    $('n' + i).textContent = TEAMS[st.team[i]].n + ' · ' + pname(st, i) + (i === me ? ' (YOU)' : ''); $('s' + i).textContent = st.score[i];
     const L = st.log[i], n = Math.max(5, L.length); $('d' + i).innerHTML = Array.from({ length: n }, (_, j) => `<i class="${L[j] === 1 ? 'g' : L[j] === 0 ? 'm' : ''}"></i>`).join('');
   });
   $('conn').textContent = st.conn[1 - me] ? '' : 'Opponent disconnected — waiting for reconnection…';
@@ -185,7 +183,7 @@ sock.on('joined', d => {
 });
 sock.on('room', d => {
   st = d; hud();
-  [0, 1].forEach(i => { const e = $('p' + i); e.textContent = (i === me ? 'You' : 'Opponent') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); }); lobbyUI(d);
+  [0, 1].forEach(i => { const e = $('p' + i); e.textContent = pname(d, i) + (i === me ? ' (you)' : '') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); }); lobbyUI(d);
 });
 sock.on('start', d => { crowdStart(); st = d; $('menu').classList.add('off'); $('hud').classList.remove('hide'); $('pad').classList.remove('hide'); hud(); });
 sock.on('turn', setupTurn);
@@ -225,7 +223,7 @@ sock.on('sync', d => {
     $('menu').classList.remove('off'); $('home').classList.add('hide'); $('lobby').classList.remove('hide');
     $('hud').classList.add('hide'); $('pad').classList.add('hide'); $('rc').textContent = d.code;
     hud();
-    [0, 1].forEach(i => { const e = $('p' + i); e.textContent = (i === me ? 'You' : 'Opponent') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); }); lobbyUI(d);
+    [0, 1].forEach(i => { const e = $('p' + i); e.textContent = pname(d, i) + (i === me ? ' (you)' : '') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); }); lobbyUI(d);
     return;
   }
   if (d.phase === 'end') {
@@ -253,17 +251,21 @@ sock.on('end', d => {
 
 function lobbyUI(d) {
   const both = d.conn[0] && d.conn[1], mine = d.ready && d.ready[me], opp = d.ready && d.ready[1 - me] ? d.team[1 - me] : null;
-  if (opp && myTeam === opp && !mine) { myTeam = opp === 'BAR' ? 'RMA' : 'BAR'; }
+  if (opp && myTeam === opp && !mine) { myTeam = Object.keys(TEAMS).find(k => k !== opp); }
   $('lt').classList.toggle('hide', !both);
   document.querySelectorAll('.team').forEach(b => { b.classList.toggle('sel', b.dataset.t === myTeam); b.classList.toggle('off', b.dataset.t === opp || !!mine); });
   $('bReady').disabled = !both || !!mine;
-  $('lmsg').textContent = !both ? 'Waiting for your opponent to join…' : mine ? 'Waiting for your opponent to be ready…' : opp ? 'Opponent picked ' + TEAMS[opp].n + '. Choose yours, then press Ready.' : 'Both players connected. Choose your team, then press Ready.';
+  const on = pname(d, 1 - me);
+  $('lmsg').textContent = !both ? 'Waiting for your opponent to join…' : mine ? 'Waiting for ' + on + ' to be ready…' : opp ? on + ' picked ' + TEAMS[opp].n + '. Choose yours, then press Ready.' : 'Both players connected. Choose your team, then press Ready.';
 }
 /* ---------- menu ---------- */
 document.querySelectorAll('.team').forEach(b => b.onclick = () => { document.querySelectorAll('.team').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); myTeam = b.dataset.t; });
-$('bQuick').onclick = () => { sessionStorage.removeItem('po'); sock.emit('quick'); };
-$('bCreate').onclick = () => { sessionStorage.removeItem('po'); sock.emit('create'); };
-$('bJoin').onclick = () => { sessionStorage.removeItem('po'); sock.emit('join', $('code').value); };
+const nm = () => ({ name: POF.name() });
+$('bQuick').onclick = () => { sessionStorage.removeItem('po'); sock.emit('quick', nm()); };
+$('bCreate').onclick = () => { sessionStorage.removeItem('po'); sock.emit('create', nm()); };
+$('bJoin').onclick = () => { sessionStorage.removeItem('po'); sock.emit('join', { code: $('code').value, ...nm() }); };
+const nameBtn = () => { $('bName').textContent = 'Player: ' + POF.name() + '  ✎'; };
+$('bName').onclick = () => POF.askName(true, nameBtn); POF.askName(false, nameBtn);
 $('bReady').onclick = () => { sock.emit('ready', myTeam); $('bReady').disabled = true; };
 $('bSound').onclick = () => { snd = !snd; if (cg) cg.gain.value = snd ? .05 : 0; $('bSound').textContent = 'Sound: ' + (snd ? 'On' : 'Off'); };
 $('bFull').onclick = () => { const d = document.documentElement; document.fullscreenElement ? document.exitFullscreen() : (d.requestFullscreen || d.webkitRequestFullscreen || (() => {})).call(d); };
@@ -271,7 +273,7 @@ $('bFull').onclick = () => { const d = document.documentElement; document.fullsc
 /* ---------- loop ---------- */
 let last = performance.now(), frame = 0, bobBoost = 0, camPos = new THREE.Vector3(0, 3, 12), camLook = new THREE.Vector3(0, 1, -11), tmp = new THREE.Vector3(), lookT = new THREE.Vector3(), kxSend = 0;
 function loop(now) {
-  requestAnimationFrame(loop);
+  requestAnimationFrame(loop); QL.tick(now);
   const dt = Math.min((now - last) / 1000, .05); last = now; frame++;
   if (frame % 4 === 0) bobSpec(now / 1000, bobBoost > 0);
   bobBoost = Math.max(0, bobBoost - dt);

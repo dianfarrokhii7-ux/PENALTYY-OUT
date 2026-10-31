@@ -25,3 +25,26 @@
 #prev i.gk{background:#c8f031}
 .srow{display:flex;flex-direction:column;gap:4px}.sl{display:flex;gap:8px}.sl input{flex:1;accent-color:var(--gold)}
 #fb{width:260px}
+
+/* ---- v6: names, bench, substitutions, stats, rating cards ---- */
+.namebtn{font-size:16px;opacity:.9;border-style:dashed}
+.screen.wide{width:min(520px,100%);max-height:100vh;overflow-y:auto;padding:12px 0;-webkit-overflow-scrolling:touch}
+.tm small{display:block;font-size:11px;font-weight:500;opacity:.75;line-height:1}
+#who{line-height:1.15}#who b{color:var(--gold);margin-left:4px}#who small{display:block;font-size:11px;opacity:.8}
+.ov{color:var(--gold);min-width:2ch;text-align:right}
+.stl{display:block;font-size:11px;opacity:.65;text-align:left;font-weight:500}
+#slots .srow>button{align-items:center;gap:8px}#slots .srow>button span:nth-child(2){flex:1;text-align:left}
+#slots .srow>button.sel .ov,#bench button.sel .ov{color:#111}
+h4{margin:6px 0 2px;text-align:left;font-size:15px;opacity:.8;letter-spacing:.08em}
+.plist{display:flex;flex-direction:column;gap:6px}
+.plist button{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 8px;font-size:15px;text-align:left;padding:8px 12px}
+.plist button .stl{flex-basis:100%}
+.plist button.sel{background:var(--gold);color:#111;border-color:var(--gold)}
+#bSubs{position:absolute;top:calc(8px + env(safe-area-inset-top));right:10px;pointer-events:auto;font-weight:700;font-size:14px;padding:8px 12px;background:rgba(6,18,12,.78)}
+#bSubs.off{opacity:.55}
+.panel{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,94vw);max-height:86vh;overflow-y:auto;background:rgba(6,18,12,.96);border:2px solid var(--chalk);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;pointer-events:auto}
+.panel .phead{display:flex;justify-content:space-between;align-items:center}.panel h3{margin:0;font-size:24px}
+#endStats{display:flex;flex-direction:column;gap:6px}
+.strow{display:flex;justify-content:space-between;border-bottom:1px solid rgba(244,240,230,.2);padding:4px 6px}.strow span{opacity:.8}.strow b{color:var(--gold);min-width:3.5ch}
+#fb{width:290px}#fb button{height:54px}#fb button.big{height:76px}
+@media (max-height:420px){#fb button{height:46px;width:60px;font-size:12px}#fb button.big{height:62px;width:84px}}

@@ -1,4 +1,6 @@
 const express = require('express');
+const path = require('path');
+const { TEAM_KEYS, sanitizeName } = require('./shared.js');
 const http = require('http');
 const { Server } = require('socket.io');
 
@@ -9,7 +11,12 @@ const io = new Server(srv, {
   pingInterval: 25000,
   pingTimeout: 20000,
 });
-app.use(express.static(__dirname));
+app.disable('x-powered-by');
+// Only the client files are public — server-side sources (server.js, friendly.js, package.json…) are never served.
+const PUBLIC = new Set(['index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js']);
+app.get('/health', (_req, res) => res.json({ ok: true, rooms: Object.keys(rooms).length, uptime: Math.round(process.uptime()) }));
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/:file', (req, res, next) => PUBLIC.has(req.params.file) ? res.sendFile(path.join(__dirname, req.params.file), { maxAge: '5m' }) : next());
 
 const RUN = 0.5;
 const rooms = Object.create(null);
@@ -32,7 +39,7 @@ function state(r) {
   return {
     code: r.code, team: [...r.team], score: [...r.score], kicks: [...r.kicks],
     log: r.log.map(x => [...x]), turn: r.turn, phase: r.phase,
-    conn: r.p.map(p => !!(p && p.on)), ready: [...r.ready],
+    conn: r.p.map(p => !!(p && p.on)), ready: [...r.ready], names: r.p.map(p => (p && p.name) || ''),
     kx: r.kx, dive: r.dive ? { ...r.dive } : null,
     shot: r.shot ? { ...r.shot } : null,
     lastResult: r.lastResult ? { ...r.lastResult } : null, winner: r.winner,
@@ -43,17 +50,17 @@ const emit = (r, event, data) => io.to(r.code).emit(event, data);
 function clearRoomTimers(r) {
   clearTimeout(r.to); clearTimeout(r.resolveTimer); clearTimeout(r.advanceTimer);
 }
-function seat(r, socket, i) {
-  r.p[i] = { id: socket.id, token: tok(), on: true, disconnectTimer: null };
+function seat(r, socket, i, name) {
+  r.p[i] = { id: socket.id, token: tok(), on: true, disconnectTimer: null, name: sanitizeName(name) || 'Player' };
   socket.join(r.code);
   socket.data = { code: r.code, i };
   socket.emit('joined', { code: r.code, i, token: r.p[i].token });
   emit(r, 'room', state(r));
 }
-function join(socket, r) {
+function join(socket, r, name) {
   const i = r.p[0] ? (r.p[1] ? -1 : 1) : 0;
   if (i < 0) return socket.emit('err', 'Room is full');
-  seat(r, socket, i);
+  seat(r, socket, i, name);
 }
 function begin(r) {
   if (r.phase !== 'lobby' || !r.ready[0] || !r.ready[1]) return;
@@ -125,14 +132,15 @@ function resolve(r) {
 io.on('connection', socket => {
   const roomForSocket = () => socket.data && rooms[socket.data.code];
 
-  socket.on('create', () => { const r = mkRoom(); seat(r, socket, 0); });
-  socket.on('join', code => {
-    const r = rooms[String(code || '').toUpperCase().trim()];
-    r ? join(socket, r) : socket.emit('err', 'Room not found');
+  socket.on('create', d => { const r = mkRoom(); seat(r, socket, 0, d && d.name); });
+  socket.on('join', d => {
+    const code = typeof d === 'string' ? d : d && d.code, r = rooms[String(code || '').toUpperCase().trim()];
+    r ? join(socket, r, d && d.name) : socket.emit('err', 'Room not found');
   });
-  socket.on('quick', () => {
-    if (queue && rooms[queue] && !rooms[queue].p[1]) { join(socket, rooms[queue]); queue = null; }
-    else { const r = mkRoom(); queue = r.code; seat(r, socket, 0); }
+  socket.on('quick', d => {
+    const name = d && d.name;
+    if (queue && rooms[queue] && !rooms[queue].p[1]) { join(socket, rooms[queue], name); queue = null; }
+    else { const r = mkRoom(); queue = r.code; seat(r, socket, 0, name); }
   });
 
   socket.on('rejoin', payload => {
@@ -155,8 +163,8 @@ io.on('connection', socket => {
   socket.on('ready', team => {
     const r = roomForSocket(); if (!r || r.phase !== 'lobby') return;
     const i = socket.data.i;
-    const wanted = team === 'RMA' ? 'RMA' : 'BAR';
-    r.team[i] = r.ready[1 - i] && r.team[1 - i] === wanted ? (wanted === 'BAR' ? 'RMA' : 'BAR') : wanted;
+    const wanted = TEAM_KEYS.includes(team) ? team : 'BAR';
+    r.team[i] = r.ready[1 - i] && r.team[1 - i] === wanted ? TEAM_KEYS.find(k => k !== wanted) : wanted;
     r.ready[i] = true;
     emit(r, 'room', state(r)); begin(r);
   });
