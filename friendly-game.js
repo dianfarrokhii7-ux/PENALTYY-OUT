@@ -165,18 +165,31 @@ function animate(e, dt, B, celeb) {
     P.hr.rotation.x = u < .35 ? .9 * (u / .35) : .9 - 2.4 * ((u - .35) / .65); P.hr.kn.rotation.x = u < .35 ? .8 : 0; P.al.rotation.z = -.7; P.ar.rotation.z = .7;
   }
   if (e.s === 0 && Math.hypot(B.x - e.x, B.z - e.z) < 2.8 && B.y > .35) { P.al.rotation.z = -2.5; P.ar.rotation.z = 2.5; P.al.rotation.x = P.ar.rotation.x = -.3; P.body.rotation.z = clamp((B.z - e.z) * .1, -.4, .4) * Math.sign(Math.cos(e.a) || 1); }
+  if (e.st === 3) { const sg = Math.sign(e.vz || 0), lx = -Math.sin(e.g.rotation.y) * sg; e.g.position.y = .35; P.body.rotation.z = -(Math.sign(lx) || 1) * 1.25 * (sg ? 1 : 0); P.al.rotation.z = -2.6; P.ar.rotation.z = 2.6; }
   if (celeb === e.t) { e.g.position.y = Math.abs(Math.sin(e.ph * 2)) * .35; P.al.rotation.z = -2.6; P.ar.rotation.z = 2.6; }
   e.pst = e.st;
 }
 
 /* ---------- game state / input ---------- */
 const Bl = { x: 0, y: BR, z: 0, o: -1 }, bt = { x: 0, y: BR, z: 0 };
-let S = null, flip = 0, celeb = -1, celebT = 0, camPos = new THREE.Vector3(0, 18, 24), camLook = new THREE.Vector3(), dmCur = 1;
+let S = null, flip = 0, celeb = -1, celebT = 0, camPos = new THREE.Vector3(0, 18, 24), camLook = new THREE.Vector3(), dmCur = 1, tmpV = new THREE.Vector3();
 const keys = {}, inp = { sx: 0, sy: 0, sp: 0 }; let joy = { x: 0, y: 0 }, spBtn = false, chargeT = 0, lastSent = '', lastSendAt = 0;
-const act = (t, p) => sock.emit('act', { t, p });
+const act = (t, p, x) => sock.emit('act', { t, p, ...x });
 function startCharge() { if (!chargeT) chargeT = performance.now(); }
 function release() { if (!chargeT) return; const p = clamp((performance.now() - chargeT) / 900, .25, 1); chargeT = 0; $('power').firstChild.style.width = '0'; act('shoot', p); }
-function press(a) { if (a === 'pass') act('pass'); else if (a === 'tk') act('tk'); else if (a === 'sw') act('sw'); else if (a === 'shoot') startCharge(); else if (a === 'sprint') spBtn = true; }
+function stick() {
+  let sx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + joy.x, sy = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) + joy.y;
+  const n = Math.hypot(sx, sy); if (n > 1) { sx /= n; sy /= n; } return [sx, sy];
+}
+function camMode() {
+  if (!S || !S.rs || S.ph !== 'dead') return { m: 'b' };
+  if (S.rs.k === 'penalty' && S.pn) { const d = S.pn[3]; if (S.rs.t === me) return S.pn[0] === 0 ? { m: 'pk', d } : { m: 'b' }; return { m: 'pg', d }; }
+  if (S.rs.k === 'freekick' && S.rs.t === me && S.k[me] === S.rs.tk) return { m: 'fk' };
+  return { m: 'b' };
+}
+function press(a) {
+  if (S && S.rs && S.rs.k === 'penalty' && S.pn && S.rs.t !== me) { if (a === 'shoot' || a === 'pass') { const [sx, sy] = stick(); act('dive', 0, { dir: sx > .3 ? 1 : sx < -.3 ? -1 : 0, hi: sy > .3 }); } return; }
+  if (a === 'pass') act('pass'); else if (a === 'tk') act('tk'); else if (a === 'sw') act('sw'); else if (a === 'shoot') startCharge(); else if (a === 'sprint') spBtn = true; }
 function unpress(a) { if (a === 'shoot') release(); else if (a === 'sprint') spBtn = false; }
 const KM = { KeyF: 'pass', KeyJ: 'pass', Space: 'shoot', KeyK: 'shoot', KeyC: 'tk', KeyL: 'tk', KeyV: 'sw', Tab: 'sw' };
 addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (KM[e.code] || e.code.startsWith('Arrow')) e.preventDefault(); if (e.repeat) return; keys[e.code] = 1; if (KM[e.code]) press(KM[e.code]); });
@@ -187,10 +200,10 @@ function joyMove(e) { const r = joyEl.getBoundingClientRect(), dx = e.clientX - 
 joyEl.addEventListener('pointerdown', e => { e.preventDefault(); joyEl.setPointerCapture(e.pointerId); joyMove(e); });
 joyEl.addEventListener('pointermove', e => { if (e.buttons || e.pressure) joyMove(e); });
 ['pointerup', 'pointercancel'].forEach(n => joyEl.addEventListener(n, () => { joy = { x: 0, y: 0 }; knob.style.transform = ''; }));
-function sendInput(now, dmv) {
-  let sx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + joy.x, sy = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) + joy.y;
-  const n = Math.hypot(sx, sy); if (n > 1) { sx /= n; sy /= n; }
-  const d = { mx: +(dmv * sx).toFixed(2), mz: +(-dmv * sy).toFixed(2), sp: keys.ShiftLeft || keys.ShiftRight || spBtn ? 1 : 0 }, j = JSON.stringify(d);
+function sendInput(now, dmv, cm) {
+  const [sx, sy] = stick(); let mx, mz;
+  if (cm.m === 'pk' || cm.m === 'pg') { mx = sx; mz = sy; } else if (cm.m === 'fk') { mx = dmv * sy; mz = dmv * sx; } else { mx = dmv * sx; mz = -dmv * sy; }
+  const d = { mx: +mx.toFixed(2), mz: +mz.toFixed(2), sp: keys.ShiftLeft || keys.ShiftRight || spBtn ? 1 : 0 }, j = JSON.stringify(d);
   if (j !== lastSent || now - lastSendAt > 300) { lastSent = j; lastSendAt = now; sock.emit('in', d); }
 }
 
@@ -230,10 +243,10 @@ sock.on('start', d => {
 });
 sock.on('snap', s => {
   S = s; flip = s.fl; Bl.o = s.b[3]; bt.x = s.b[0]; bt.y = s.b[1]; bt.z = s.b[2];
-  s.p.forEach((p, i) => { const e = ents[i]; if (!e) return; e.tx = p[0]; e.tz = p[1]; e.ta = p[2]; e.st = p[3]; e.red = p[4]; e.sp = p[5]; });
+  s.p.forEach((p, i) => { const e = ents[i]; if (!e) return; e.tx = p[0]; e.tz = p[1]; e.ta = p[2]; e.st = p[3]; e.red = p[4]; e.sp = p[5]; e.vz = p[7] || 0; });
   $('s0').textContent = s.s[0]; $('s1').textContent = s.s[1]; $('clk').textContent = `${s.h === 1 ? '1st' : '2nd'}  ${Math.floor(s.c / 60)}:${String(s.c % 60).padStart(2, '0')}`;
   const ce = ents[s.k[me]]; $('who').textContent = ce ? `${ce.name}  #${ce.num}` : '';
-  $('msg').textContent = s.ph === 'dead' && s.rs ? `${RS[s.rs.k]} — ${s.rs.t === me ? 'YOU (pass / shoot)' : 'opponent'}` : '';
+  $('msg').textContent = s.ph === 'dead' && s.rs ? (s.rs.k === 'penalty' ? (s.rs.t === me ? (s.pn && s.pn[0] === 0 ? 'PENALTY — aim with stick / WASD, hold SHOOT, release to kick' : '') : 'PENALTY — you are the goalkeeper: move left/right, press SHOOT to dive toward the stick') : `${RS[s.rs.k]} — ${s.rs.t === me ? 'YOU (pass / shoot)' : 'opponent'}`) : '';
   if (chargeT) $('power').firstChild.style.width = clamp((performance.now() - chargeT) / 900, 0, 1) * 100 + '%';
   if (room && room.on) $('conn').textContent = room.on[1 - me] ? '' : 'Opponent disconnected — AI is playing for them';
 });
@@ -245,6 +258,7 @@ sock.on('ev', list => list.forEach(e => {
   else if (e.k === 'restart') { beep(2400, .25, 'square', .05); if (e.type !== 'kickoff') banner(RS[e.type]); }
   else if (e.k === 'goal') { celeb = e.t; celebT = 3.2; banner(e.t === me ? 'GOAL!' : 'GOAL FOR OPPONENT', e.t === me ? '#2ecc71' : '#e63946'); [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)); crowd(.45, 1000, 4.5); }
   else if (e.k === 'foul') { beep(2400, .5, 'square', .06); banner(e.card === 'r' ? 'RED CARD' : e.card === 'y' ? 'YELLOW CARD' : e.pen ? 'FOUL — PENALTY' : 'FOUL', e.card === 'r' ? '#e63946' : '#ffd23f'); crowd(.2, 450, 2.5); }
+  else if (e.k === 'penres') { if (e.res !== 'goal') banner(e.res === 'save' ? 'SAVED!' : e.res === 'post' ? 'OFF THE POST!' : 'MISSED!', '#e63946'); }
   else if (e.k === 'half') { banner('HALF TIME', '#ffd23f'); beep(2000, .8, 'square', .06); }
   else if (e.k === 'end') { $('hud').classList.add('hide'); $('fpad').classList.add('hide'); $('menu').classList.remove('off'); show('end'); sessionStorage.removeItem('pof'); const a = e.score[me], b = e.score[1 - me]; $('endT').textContent = `${a > b ? 'YOU WIN' : a < b ? 'YOU LOSE' : 'DRAW'}  ${a} – ${b}`; }
 }));
@@ -262,7 +276,7 @@ let last = performance.now(), frame = 0;
 function loop(now) {
   requestAnimationFrame(loop); const dt = Math.min((now - last) / 1000, .05); last = now; frame++;
   const dmv = (me === 1 ? -1 : 1) * (flip ? -1 : 1);
-  if (G && S) sendInput(now, dmv);
+  const cm = camMode(); if (G && S) sendInput(now, dmv, cm);
   groups.forEach((g, i) => { g.position.y = Math.max(0, Math.sin(now / 1000 * (celebT > 0 ? 9 : 2.2) + i * 1.7)) * (celebT > 0 ? .45 : .06); });
   celebT = Math.max(0, celebT - dt);
   const k = Math.min(1, dt * 14);
@@ -278,9 +292,15 @@ function loop(now) {
   const ce = S && ents[S.k[me]]; ring.visible = arrow.visible = !!ce;
   if (ce) { ring.position.x = ce.x; ring.position.z = ce.z; arrow.position.set(ce.x, 2.25 + Math.sin(now / 200) * .08, ce.z); }
   dmCur += (dmv - dmCur) * Math.min(1, dt * 2);
-  const bx = ball.position.x, tgt = new THREE.Vector3(clamp(bx * .75, -17, 17), cam.aspect < 1 ? 22 : 15.5, dmCur * (cam.aspect < 1 ? 26 : 21));
-  camPos.lerp(tgt, Math.min(1, dt * 2.5)); camLook.lerp(new THREE.Vector3(clamp(bx * .85, -21, 21), 0, 0), Math.min(1, dt * 3));
-  cam.position.copy(camPos); cam.lookAt(camLook); R.render(scene, cam);
+  const bx = ball.position.x, bz = ball.position.z, V = THREE.Vector3; let tgt, look, kk = Math.min(1, dt * 2.5);
+  if (cm.m === 'pk') { tgt = new V(S.b[0] - cm.d * 5, 2, 0); look = new V(cm.d * L, 1, 0); kk = Math.min(1, dt * 4); }
+  else if (cm.m === 'pg') { tgt = new V(cm.d * (L + 4.5), 2.7, 0); look = new V(cm.d * (L - 6), .9, 0); kk = Math.min(1, dt * 4); }
+  else if (cm.m === 'fk') { const gx = dmv * L, dx = gx - bx, dz = -bz, n = Math.hypot(dx, dz) || 1; tgt = new V(bx - dx / n * 5, 2.3, bz - dz / n * 5); look = new V(gx, 1, 0); kk = Math.min(1, dt * 4); }
+  else { tgt = new V(clamp(bx * .75, -17, 17), cam.aspect < 1 ? 22 : 15.5, dmCur * (cam.aspect < 1 ? 26 : 21)); look = new V(clamp(bx * .85, -21, 21), 0, 0); }
+  camPos.lerp(tgt, kk); camLook.lerp(look, kk); cam.position.copy(camPos); cam.lookAt(camLook);
+  const cr = $('cross'); cr.classList.toggle('hide', cm.m !== 'pk');
+  if (cm.m === 'pk') { tmpV.set(cm.d * L, .15 + S.pn[2] * 1.9, S.pn[1]).project(cam); cr.style.left = (tmpV.x * .5 + .5) * innerWidth + 'px'; cr.style.top = (-tmpV.y * .5 + .5) * innerHeight + 'px'; }
+  R.render(scene, cam);
 }
 requestAnimationFrame(loop);
 })();

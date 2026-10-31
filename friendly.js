@@ -30,12 +30,13 @@ function setRestart(r, type, t, x, z) {
   if (!tk) tk = r.P.find(q => q.t === t && !q.red);
   const fx = type === 'throwin' ? 0 : d, fz = type === 'throwin' ? -Math.sign(z) : 0;
   tk.fx = fx; tk.fz = fz; tk.x = x - fx * .8; tk.z = z - fz * .8; tk.vx = tk.vz = 0;
-  r.rs = { type, team: t, taker: tk.i, t: 0, x, z };
+  r.rs = { type, team: t, taker: tk.i, t: 0, x, z }; r.pen = null;
+  if (type === 'penalty') { r.pen = { t, tk: tk.i, gk: (1 - t) * 5, d, sx: x, az: 0, ay: .35, kz: 0, st: 'aim', tt: 0, dive: null }; if (r.on[1 - t]) r.ctrl[1 - t] = (1 - t) * 5; }
   if (r.on[t]) r.ctrl[t] = tk.i;
   r.ev.push({ k: 'restart', type, t });
 }
 function kick(r, p, vx, vz, vy) {
-  const B = r.ball; B.o = -1; B.vx = vx; B.vz = vz; B.vy = vy; B.rt = 0; r.last = p.t; p.kk = .35; p.st = 2; p.stt = .25;
+  const B = r.ball; B.o = -1; B.vx = vx; B.vz = vz; B.vy = vy; B.rt = 0; r.shotId = (r.shotId || 0) + 1; r.last = p.t; p.kk = .35; p.st = 2; p.stt = .25;
   if (r.ph === 'dead') { r.ph = 'play'; r.rs = null; }
   r.ev.push({ k: 'kick' });
 }
@@ -73,6 +74,12 @@ function swit(r, t) {
 }
 function act(r, t, a) {
   const p = r.P[r.ctrl[t]]; if (!p || p.red || !['play', 'dead'].includes(r.ph)) return; const B = r.ball, i = r.inp[t];
+  if (r.pen && r.ph === 'dead') {
+    const pn = r.pen;
+    if (a.t === 'shoot' && t === pn.t && pn.st === 'aim') penShoot(r, clamp(+a.p || .5, .25, 1));
+    else if (a.t === 'dive' && t === 1 - pn.t && pn.st === 'fly' && !pn.dive) { const dir = clamp(Math.round(+a.dir || 0), -1, 1); pn.dive = { dz: -pn.d * dir * 2.6, hi: !!a.hi || !dir, at: pn.tt }; }
+    return;
+  }
   if (a.t === 'sw') return swit(r, t);
   const can = B.o === p.i || (r.ph === 'dead' && r.rs && r.rs.taker === p.i);
   if (can && a.t === 'pass') pass(r, p, i.mx, i.mz);
@@ -80,16 +87,96 @@ function act(r, t, a) {
   else if (!can && a.t === 'tk') tackle(r, p);
 }
 function aim(p, tx, tz, sp) { const dx = tx - p.x, dz = tz - p.z, n = hyp(dx, dz); return n < .35 || !sp ? [0, 0] : [dx / n * sp * Math.min(1, n / 1.5), dz / n * sp * Math.min(1, n / 1.5)]; }
+function gk(r, p, d) {
+  const B = r.ball, gx = -d * L; p.sl = Math.max(0, (p.sl || 0) - DT);
+  if (r.pen && p.i === r.pen.gk) return [0, 0];
+  if (B.o === p.i && r.ph === 'play') { p.hold -= DT; if (p.hold <= 0) pass(r, p, d, (rnd() - .5) * .8); return [0, 0]; }
+  const dist = hyp(B.x - gx, B.z), off = clamp(dist * .16, 1, 4.2);
+  let tx = gx + (B.x - gx) / (dist || 1) * off, tz = clamp(B.z / (dist || 1) * off, -GW - .5, GW + .5), sp = 4.5, dive = false;
+  if (B.o < 0 && r.ph === 'play' && B.vx * -d > 2) {
+    const t = (gx - B.x) / B.vx;
+    if (t > 0 && t < 1.8) {
+      const sps = hyp(B.vx, B.vz), pz = B.z + B.vz * t, py = Math.max(0, B.y + B.vy * t - 4.9 * t * t);
+      if (Math.abs(pz) < GW + 1.3 && py < 2.5) {
+        if (p.sid !== r.shotId) { p.sid = r.shotId; p.rtm = .2 + rnd() * .35; p.err = (rnd() - .5) * (2.2 + sps * .14); }
+        if (B.rt > p.rtm) { tz = clamp(pz + p.err, -GW - .7, GW + .7); dive = true; }
+      }
+    }
+  }
+  const cr = B.o >= 0 && r.P[B.o].t !== p.t ? r.P[B.o] : null;
+  if (!dive && cr && r.ph === 'play') {
+    const dc = hyp(cr.x - gx, cr.z), dg = hyp(cr.x - p.x, cr.z - p.z);
+    if (dc < 10 && dg < 9) {
+      if (dg < 1.5 && p.sl <= 0) {
+        p.sl = 1.4; p.st = 3; p.stt = .4; const q = rnd();
+        if (q < .12) { foul(r, p, cr, false); return [0, 0]; }
+        if (q < .6) { B.o = p.i; B.vx = B.vz = 0; p.hold = .8; r.last = p.t; r.ev.push({ k: 'save' }); }
+        else { B.o = -1; B.vx = (rnd() - .5) * 6; B.vz = (rnd() - .5) * 6; B.vy = 1; cr.stun = .6; r.last = p.t; }
+        return [0, 0];
+      }
+      tx = cr.x + cr.vx * .25; tz = cr.z + cr.vz * .25; sp = 6.8;
+    }
+  } else if (!dive && B.o < 0 && r.ph === 'play' && Math.abs(B.x - gx) < 7 && Math.abs(B.z) < 6 && hyp(B.vx, B.vz) < 8) { tx = B.x; tz = B.z; sp = 6.5; }
+  if (dive) { p.st = 3; p.stt = .35; return [clamp((gx - p.x) * 3, -3, 3), clamp((tz - p.z) * 10, -7, 7)]; }
+  return aim(p, tx, tz, sp);
+}
+// Non-controlled players only hold their zone: no tackling, passing or shooting (the human switches to the ball carrier).
 function ai(r, p) {
   const B = r.ball, d = dirOf(r, p.t), dead = r.ph === 'dead', rs = r.rs;
   if (dead && rs.taker === p.i) return [0, 0];
-  const opp = r.P.filter(q => q.t !== p.t && !q.red), f = FORMS[r.lu[p.t].form][p.s];
-  if (p.s === 0) {
-    let tz = clamp(B.z * .45, -GW, GW); const toward = B.vx * -d > 1.5 && B.o < 0;
-    if (toward && B.rt > .22) { const t = (-d * L - B.x) / B.vx; if (t > 0 && t < 2) tz = clamp(B.z + B.vz * t, -GW, GW); }
-    if (B.o === p.i && r.ph === 'play') { p.hold -= DT; if (p.hold <= 0) pass(r, p, d, 0); return [0, 0]; }
-    return aim(p, -d * (L - 1.3), tz, toward ? 5 : 4);
+  if (p.s === 0) return gk(r, p, d);
+  if (!r.on[p.t]) return aiFull(r, p);
+  const f = FORMS[r.lu[p.t].form][p.s], hx = f[0] * L * d, hz = f[1] * W, mine = B.o >= 0 && r.P[B.o].t === p.t, theirs = B.o >= 0 && !mine;
+  const ax = f[0] < -.3 ? 5 : 7, az = 7; let tx = B.x, tz = B.z * .8;
+  if (mine) { tx = hx + d * ax; tz = hz; } else if (theirs) tx = hx - d * ax * .6;
+  tx = clamp(tx, hx - ax, hx + ax); tz = clamp(tz, hz - az, hz + az);
+  if (dead && p.t !== rs.team && hyp(tx - B.x, tz - B.z) < 6) { const n = hyp(p.x - B.x, p.z - B.z) || 1; tx = B.x + (p.x - B.x) / n * 6; tz = B.z + (p.z - B.z) / n * 6; }
+  if (r.pen) { const dp = r.pen.d; if (dp * tx > L - 9.5) tx = dp * (L - 9.5); }
+  return aim(p, tx, tz, 5.2);
+}
+function penShoot(r, pw) {
+  const pn = r.pen, j = Math.pow(pw, 3);
+  pn.tz = pn.az + (rnd() - .5) * j * 1.4; pn.ty = .15 + pn.ay * 1.9 + (rnd() - .5) * j * .5; pn.T = 1.0 - .55 * pw; pn.st = 'fly'; pn.tt = 0;
+  const tk = r.P[pn.tk]; tk.st = 2; tk.stt = .25; r.last = pn.t; r.ev.push({ k: 'kick' });
+}
+function penResolve(r) {
+  const pn = r.pen, B = r.ball, d = pn.d, def = 1 - pn.t, g = r.P[pn.gk], { tz, ty } = pn; let res;
+  if (Math.abs(tz) > GW + .01 || ty > 2) res = 'miss';
+  else if (Math.abs(Math.abs(tz) - GW) < .12 || Math.abs(ty - 2) < .1) res = 'post';
+  else {
+    const dv = pn.dive; let ex = pn.kz, cy = .7, rx = .8, ry = .9;
+    if (dv) { const f = dv.at > pn.T - .28 ? .55 : 1; ex = pn.kz + dv.dz * f; cy = dv.hi ? 1.35 : .6; rx = 1.15; ry = .8; }
+    res = Math.abs(tz - ex) < rx && Math.abs(ty - cy) < ry ? 'save' : 'goal';
   }
+  r.pen = null; r.rs = null; B.x = d * L; B.z = tz; B.y = clamp(ty, BR, 2); B.o = -1; g.kk = .5;
+  r.ev.push({ k: 'penres', res }); if (r.on[def]) swit(r, def);
+  if (res === 'goal') { B.vx = d * 3; B.vz = 0; B.vy = 0; end(r, pn.t); }
+  else if (res === 'miss') setRestart(r, 'goalkick', def, d * (L - 2), 0);
+  else { B.vx = -d * (res === 'save' ? 4 : 6); B.vz = (rnd() - .5) * 6; B.vy = 2; r.ph = 'play'; r.last = res === 'save' ? def : pn.t; r.ev.push({ k: 'save' }); }
+}
+function penTick(r) {
+  const pn = r.pen, B = r.ball, d = pn.d, def = 1 - pn.t, g = r.P[pn.gk], tk = r.P[pn.tk], sh = r.inp[pn.t], df = r.inp[def];
+  pn.tt += DT; r.rs.t += DT; B.vx = B.vz = B.vy = 0; B.o = -1;
+  tk.fx = d; tk.fz = 0; tk.x = pn.sx - d; tk.z = 0; tk.vx = tk.vz = 0;
+  if (pn.st === 'aim') {
+    B.x = pn.sx; B.z = 0; B.y = BR;
+    if (r.on[pn.t]) { pn.az = clamp(pn.az + d * sh.mx * 1.6 * DT, -3.6, 3.6); pn.ay = clamp(pn.ay + sh.mz * DT, 0, 1.2); }
+    if (r.on[def]) pn.kz = clamp(pn.kz - d * df.mx * 3.5 * DT, -2.6, 2.6);
+    g.x = d * (L - .8); g.z += (pn.kz - g.z) * Math.min(1, DT * 8); g.fx = -d; g.fz = 0; g.vx = g.vz = 0;
+    if (pn.tt > (r.on[pn.t] ? 14 : 1.8)) { if (!r.on[pn.t]) { pn.az = (rnd() < .5 ? -1 : 1) * (.8 + rnd() * 1.3); pn.ay = .2 + rnd() * .5; } penShoot(r, r.on[pn.t] ? .55 : .5 + rnd() * .4); }
+  } else {
+    const s = Math.min(pn.tt / pn.T, 1);
+    B.x = pn.sx + d * 6 * s; B.z = pn.tz * s; B.y = BR + (pn.ty - BR) * s + .4 * s * (1 - s);
+    if (!r.on[def] && !pn.dive && pn.tt > .15) pn.dive = { dz: [-2.4, 0, 2.4][Math.floor(rnd() * 3)], hi: rnd() < .4, at: pn.tt };
+    let tz = pn.kz; if (pn.dive) { tz = clamp(pn.kz + pn.dive.dz, -3.2, 3.2); g.st = 3; g.stt = .5; }
+    const nz = g.z + clamp(tz - g.z, -9 * DT, 9 * DT); g.vz = (nz - g.z) / DT; g.z = nz; g.x = d * (L - .8);
+    if (pn.tt >= pn.T) penResolve(r);
+  }
+}
+function aiFull(r, p) {
+  const B = r.ball, d = dirOf(r, p.t), dead = r.ph === 'dead', rs = r.rs;
+  if (dead && rs.taker === p.i) return [0, 0];
+  const opp = r.P.filter(q => q.t !== p.t && !q.red), f = FORMS[r.lu[p.t].form][p.s];
   if (B.o === p.i && r.ph === 'play') {
     p.th -= DT; const gx = d * L;
     if (p.th <= 0) {
@@ -124,7 +211,8 @@ function tick(r) {
       else { r.ph = 'end'; r.ev.push({ k: 'end', score: [...r.score] }); return; }
     }
   }
-  if (r.ph === 'dead') { r.rs.t += DT; const t = r.rs.team, tk = r.P[r.rs.taker], hum = r.on[t] && r.ctrl[t] === tk.i;
+  if (r.ph === 'dead' && r.pen) penTick(r);
+  else if (r.ph === 'dead') { r.rs.t += DT; const t = r.rs.team, tk = r.P[r.rs.taker], hum = r.on[t] && r.ctrl[t] === tk.i;
     if (r.rs.t > (hum ? 9 : 1.6)) { const d = dirOf(r, t), ty = r.rs.type; if (ty === 'penalty' || (ty === 'freekick' && hyp(d * L - B.x, B.z) < 14)) shoot(r, tk, .75, (rnd() < .5 ? -1.7 : 1.7)); else pass(r, tk, d, (rnd() - .5) * .6); } }
   for (let t = 0; t < 2; t++) { let b = -1, bd = 1e9; for (const q of r.P) if (q.t === t && q.s > 0 && !q.red && !(r.on[t] && r.ctrl[t] === q.i)) { const dd = hyp(q.x - B.x, q.z - B.z); if (dd < bd) { bd = dd; b = q.i; } } r.chase[t] = b; }
   for (const p of r.P) {
@@ -136,7 +224,7 @@ function tick(r) {
       if (n > .1) { if (frozen) { p.fx = i.mx / n; p.fz = i.mz / n; } else { const s = (i.sp ? 7.6 : 6) * Math.min(1, n) * (B.o === p.i ? .93 : 1); wx = i.mx / n * s; wz = i.mz / n * s; } }
     } else { const a = ai(r, p); wx = a[0]; wz = a[1]; }
     if (p.st === 1) { p.stt -= DT; if (p.stt <= 0) p.st = 0; const k = p.stt > .12 ? 8.5 : 2; wx = p.fx * k; wz = p.fz * k; }
-    else if (p.st === 2) { p.stt -= DT; if (p.stt <= 0) p.st = 0; }
+    else if (p.st === 2 || p.st === 3) { p.stt -= DT; if (p.stt <= 0) p.st = 0; }
     if (p.stun > 0) { wx *= .2; wz *= .2; }
     p.vx += (wx - p.vx) * Math.min(1, DT * 9); p.vz += (wz - p.vz) * Math.min(1, DT * 9);
     p.x = clamp(p.x + p.vx * DT, -L - 3, L + 3); p.z = clamp(p.z + p.vz * DT, -W - 2, W + 2);
@@ -160,8 +248,9 @@ function tick(r) {
     if (r.ph === 'play') {
       for (const p of r.P) {
         if (p.red || p.kk > 0 || p.stun > 0) continue; const gk = p.s === 0, dd = hyp(p.x - B.x, p.z - B.z), sp = hyp(B.vx, B.vz);
-        if (dd < (gk ? 1.15 : .8) && B.y < (gk ? 2.2 : .9)) {
-          if (sp >= 22 && (!gk || rnd() < .45)) { if (gk) { B.vx *= -.35; B.vz += (rnd() - .5) * 6; B.vy = 2; r.last = p.t; r.ev.push({ k: 'save' }); break; } continue; }
+        if (dd < (gk ? (p.st === 3 ? 1.15 : .95) : .8) && B.y < (gk ? 2.2 : .9)) {
+          if (gk) { if (rnd() > (sp < 14 ? .92 : sp < 22 ? .5 : .22)) { B.vx *= -.3; B.vz += (rnd() - .5) * 7; B.vy = 2; r.last = p.t; p.kk = .4; r.ev.push({ k: 'save' }); break; } }
+          else if (sp >= 22) continue;
           B.o = p.i; B.vx = B.vz = 0; r.last = p.t; p.hold = 1.2; if (gk) r.ev.push({ k: 'save' }); if (r.on[p.t] && p.s) r.ctrl[p.t] = p.i; break;
         }
       }
@@ -177,8 +266,8 @@ function tick(r) {
 }
 function snap(r) {
   const B = r.ball;
-  return { c: Math.ceil(r.clock), h: r.half, s: r.score, ph: r.ph, rs: r.rs ? { k: r.rs.type, t: r.rs.team } : null, fl: r.flip ? 1 : 0,
-    b: [rd(B.x), rd(B.y), rd(B.z), B.o], p: r.P.map(p => [rd(p.x), rd(p.z), rd(Math.atan2(p.fz, p.fx)), p.st, p.red ? 1 : 0, rd(hyp(p.vx, p.vz)), p.y]), k: r.ctrl };
+  return { c: Math.ceil(r.clock), h: r.half, s: r.score, ph: r.ph, rs: r.rs ? { k: r.rs.type, t: r.rs.team, tk: r.rs.taker } : null, pn: r.pen ? [r.pen.st === 'aim' ? 0 : 1, rd(r.pen.az), rd(r.pen.ay), r.pen.d] : null, fl: r.flip ? 1 : 0,
+    b: [rd(B.x), rd(B.y), rd(B.z), B.o], p: r.P.map(p => [rd(p.x), rd(p.z), rd(Math.atan2(p.fz, p.fx)), p.st, p.red ? 1 : 0, rd(hyp(p.vx, p.vz)), p.y, rd(p.vz)]), k: r.ctrl };
 }
 
 function attach(io) {
@@ -224,4 +313,4 @@ function attach(io) {
     }
   }, 1000 * DT);
 }
-module.exports = { attach, mk, start, tick, snap, FORMS };
+module.exports = { attach, mk, start, tick, snap, FORMS, setRestart, act };

@@ -45,3 +45,9 @@ Open `/friendly.html` (button "Friendly Match 5v5" on the main menu). The penalt
 - Rules: kick-off, throw-ins, goal kicks, corners, fouls (tackle from behind is risky), yellow/red cards (red = team plays a man down), free kicks, penalties.
 - Controls PC: WASD move, Shift sprint, F pass, Space shoot (hold for power), C tackle, V switch player. Mobile: joystick + SWITCH / TACKLE / PASS / SHOOT / SPRINT buttons.
 - Not yet: offside, substitutions, extra time/penalty shootout after a draw, AI difficulty levels.
+
+## v4 changes (friendly mode)
+- Players you do not control only hold their own zone: they cannot tackle, pass or shoot. Switch to the ball carrier (it also switches automatically when a teammate wins the ball or receives a pass).
+- Goalkeepers: position to narrow the angle, dive for shots (stronger shots are harder to hold), rush out for 1v1s, claim loose balls in the box, and sometimes foul (-> penalty).
+- Penalty = same system as the shootout: shooter camera behind the ball (aim, hold SHOOT), the defending player controls the keeper behind the goal (move, then press SHOOT to dive toward the stick). After the kick the shooter's camera returns to the broadcast view; the keeper's stays behind the goal until the result so dive directions stay consistent.
+- Free kicks: only the taker gets the behind-the-ball camera; the other player keeps the broadcast view.
