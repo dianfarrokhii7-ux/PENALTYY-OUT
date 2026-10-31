@@ -16,3 +16,12 @@
 #fb button{width:68px;height:60px;font-size:13px;font-weight:700;background:rgba(6,18,12,.7);touch-action:none}
 #fb button.big{width:96px;height:80px;font-size:18px;background:var(--gold);color:#111;border-color:var(--gold)}
 #fb button.p{outline:3px solid var(--gold)}
+
+.teams .team{font-size:14px;padding:10px 6px}
+.team[data-t=MJ].sel{background:linear-gradient(90deg,#111,#8a6d00);color:#ffd23f}
+#forms{flex-wrap:wrap}#forms button{flex:1;font-size:14px;padding:8px 6px}
+#prev{position:relative;height:110px;border:2px solid var(--chalk);border-radius:6px;background:linear-gradient(90deg,#2c8a3c 50%,#34a044 50%);background-size:20% 100%}
+#prev i{position:absolute;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:var(--gold);color:#111;font:700 11px/20px Oswald,sans-serif;text-align:center;transition:left .15s,top .15s}
+#prev i.gk{background:#c8f031}
+.srow{display:flex;flex-direction:column;gap:4px}.sl{display:flex;gap:8px}.sl input{flex:1;accent-color:var(--gold)}
+#fb{width:260px}

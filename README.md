@@ -51,3 +51,12 @@ Open `/friendly.html` (button "Friendly Match 5v5" on the main menu). The penalt
 - Goalkeepers: position to narrow the angle, dive for shots (stronger shots are harder to hold), rush out for 1v1s, claim loose balls in the box, and sometimes foul (-> penalty).
 - Penalty = same system as the shootout: shooter camera behind the ball (aim, hold SHOOT), the defending player controls the keeper behind the goal (move, then press SHOOT to dive toward the stick). After the kick the shooter's camera returns to the broadcast view; the keeper's stays behind the goal until the result so dive directions stay consistent.
 - Free kicks: only the taker gets the behind-the-ball camera; the other player keeps the broadcast view.
+
+## v5 changes (friendly mode)
+- New team MASHIN JADID (Kairo GK, Kalbas, Ryven, Bati, Ishin). Kit colours (black/gold) are a placeholder, edit `kitTex`/`K` in friendly-game.js.
+- Players near a loose or airborne ball take it (feet or header) and control switches to them. Kick-off: first touch must be a pass.
+- Faster, more accurate passes. CROSS button (E on PC, CROSS on mobile; also takes corners). Ball in the air + SHOOT = header (85%) or volley (15%).
+- Out of play: ball crossing any line (dribbled, passed, shot or deflected) gives throw-in / goal kick / corner by last touch; ball over the goal line between the posts and under the bar is a goal; posts and crossbar bounce the ball.
+- Line-up: any custom formation (sliders per player, live preview) besides 2-1-1 / 1-2-1 / 1-1-2.
+- Visuals: sloped 3D nets that ripple on goals, real-time shadows (desktop), grassy pitch texture, sky dome, corner flags, floodlight glow.
+- Camera follows the ball in depth and height so the near touchline stays visible.

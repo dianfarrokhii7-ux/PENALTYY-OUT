@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 const L = 25, W = 15, GW = 2.5, BR = .18;
 const TEAMS = {
   BAR: { n: 'BARCELONA', r: [['Joan García', 13], ['Lamine Yamal', 19], ['Gerard Martín', 18], ['Raphinha', 11], ['Gavi', 6]] },
+  MJ: { n: 'MASHIN JADID', r: [['Kairo', 1], ['Kalbas', 7], ['Ryven', 10], ['Bati', 9], ['Ishin', 5]] },
   RMA: { n: 'REAL MADRID', r: [['Thibaut Courtois', 1], ['Antonio Rüdiger', 22], ['Trent Alexander-Arnold', 12], ['Eduardo Camavinga', 6], ['Kylian Mbappé', 10]] }
 };
 const FORMS = {
@@ -39,37 +40,67 @@ function crowd(level, freq, dur) {
 
 /* ---------- scene ---------- */
 const R = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true, powerPreference: 'high-performance' });
-R.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+const MOB = matchMedia('(pointer:coarse)').matches, SH = !MOB;
+R.setPixelRatio(Math.min(devicePixelRatio, MOB ? 1.25 : 1.75)); R.shadowMap.enabled = SH; R.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a1830); scene.fog = new THREE.Fog(0x0a1830, 50, 120);
 const cam = new THREE.PerspectiveCamera(48, 1, .1, 250);
 const resize = () => { R.setSize(innerWidth, innerHeight, false); cam.aspect = innerWidth / innerHeight; cam.fov = cam.aspect < 1 ? 70 : 48; cam.updateProjectionMatrix(); };
 addEventListener('resize', resize); resize();
 scene.add(new THREE.HemisphereLight(0xdde8ff, 0x2a4a2a, .95));
-const sun = new THREE.DirectionalLight(0xffffff, .75); sun.position.set(10, 40, 15); scene.add(sun);
+const sun = new THREE.DirectionalLight(0xffffff, .75); sun.position.set(10, 40, 15); scene.add(sun); sun.castShadow = SH;
+if (SH) { sun.shadow.mapSize.set(2048, 2048); const sc = sun.shadow.camera; sc.left = -34; sc.right = 34; sc.top = 24; sc.bottom = -24; sc.near = 5; sc.far = 90; sun.shadow.bias = -.0006; scene.add(sun.target); }
 const mat = (c, o) => new THREE.MeshLambertMaterial({ color: c, ...o });
 
-(function pitch() {
-  const c = document.createElement('canvas'); c.width = 1120; c.height = 720; const x = c.getContext('2d'), k = 20, X = m => (m + 28) * k, Z = m => (m + 18) * k;
-  for (let i = 0; i < 14; i++) { x.fillStyle = i % 2 ? '#2f8f3f' : '#36a247'; x.fillRect(i * 80, 0, 80, 720); }
-  x.strokeStyle = '#fff'; x.lineWidth = 3; x.strokeRect(X(-L), Z(-W), 2 * L * k, 2 * W * k);
-  x.beginPath(); x.moveTo(X(0), Z(-W)); x.lineTo(X(0), Z(W)); x.stroke(); x.beginPath(); x.arc(X(0), Z(0), 4 * k, 0, 7); x.stroke();
-  [-1, 1].forEach(s => { x.strokeRect(X(s > 0 ? L - 8 : -L), Z(-7), 8 * k, 14 * k); x.strokeRect(X(s > 0 ? L - 3 : -L), Z(-4), 3 * k, 8 * k); x.beginPath(); x.arc(X(s * (L - 6)), Z(0), 4, 0, 7); x.fillStyle = '#fff'; x.fill(); });
-  x.beginPath(); x.arc(X(0), Z(0), 4, 0, 7); x.fill();
-  const t = new THREE.CanvasTexture(c); t.anisotropy = 4;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(56, 36), new THREE.MeshBasicMaterial({ map: t })); m.rotation.x = -Math.PI / 2; scene.add(m);
-  const g = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat(0x1c4a24)); g.rotation.x = -Math.PI / 2; g.position.y = -.05; scene.add(g);
+const glowTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.3, 'rgba(255,255,255,.4)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
+(function sky() {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 256; const x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, '#04091a'); g.addColorStop(.55, '#0e2347'); g.addColorStop(1, '#26456e'); x.fillStyle = g; x.fillRect(0, 0, 4, 256);
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(200, 16, 12), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.BackSide, fog: false })));
 })();
-/* goals */
-const netT = (() => { const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d'); x.strokeStyle = 'rgba(255,255,255,.8)'; x.lineWidth = 2; x.strokeRect(0, 0, 32, 32); const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 4); return t; })();
-const netM = new THREE.MeshBasicMaterial({ map: netT, transparent: true, opacity: .5, side: THREE.DoubleSide, depthWrite: false });
+(function pitch() {
+  const k = 30, c = document.createElement('canvas'); c.width = 56 * k; c.height = 36 * k; const x = c.getContext('2d'), X = m => (m + 28) * k, Z = m => (m + 18) * k;
+  for (let i = 0; i < 14; i++) { const gr = x.createLinearGradient(0, 0, 0, c.height); const a = i % 2 ? ['#2c8a3c', '#34a044', '#2c8a3c'] : ['#339a43', '#3fb352', '#339a43']; gr.addColorStop(0, a[0]); gr.addColorStop(.5, a[1]); gr.addColorStop(1, a[2]); x.fillStyle = gr; x.fillRect(i * c.width / 14, 0, c.width / 14 + 1, c.height); }
+  for (let i = 0; i < 14000; i++) { x.fillStyle = Math.random() < .5 ? 'rgba(0,0,0,.05)' : 'rgba(255,255,255,.04)'; x.fillRect(Math.random() * c.width, Math.random() * c.height, 2 + Math.random() * 3, 2 + Math.random() * 3); }
+  x.strokeStyle = 'rgba(255,255,255,.93)'; x.lineWidth = 4.5; x.strokeRect(X(-L), Z(-W), 2 * L * k, 2 * W * k);
+  x.beginPath(); x.moveTo(X(0), Z(-W)); x.lineTo(X(0), Z(W)); x.stroke(); x.beginPath(); x.arc(X(0), Z(0), 4 * k, 0, 7); x.stroke();
+  [-1, 1].forEach(s => { x.strokeRect(X(s > 0 ? L - 8 : -L), Z(-7), 8 * k, 14 * k); x.strokeRect(X(s > 0 ? L - 3 : -L), Z(-4), 3 * k, 8 * k); x.fillStyle = '#fff'; x.beginPath(); x.arc(X(s * (L - 6)), Z(0), 5, 0, 7); x.fill(); x.beginPath(); x.arc(X(s * (L - 6)), Z(0), 4 * k, s > 0 ? Math.PI - 1.0 : -1.0 + 0, s > 0 ? Math.PI + 1.0 : 1.0); x.stroke(); });
+  x.fillStyle = '#fff'; x.beginPath(); x.arc(X(0), Z(0), 5, 0, 7); x.fill();
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 8;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(56, 36), new THREE.MeshLambertMaterial({ map: t, color: 0x9c9c9c })); m.rotation.x = -Math.PI / 2; m.receiveShadow = SH; scene.add(m);
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat(0x1c4a24)); g.rotation.x = -Math.PI / 2; g.position.y = -.05; scene.add(g);
+  [-1, 1].forEach(sx => [-1, 1].forEach(sz => {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, 1.5, 6), mat(0xffffff)); pole.position.set(sx * L, .75, sz * W); scene.add(pole);
+    const fl = new THREE.Mesh(new THREE.PlaneGeometry(.35, .25), new THREE.MeshBasicMaterial({ color: 0xffd23f, side: THREE.DoubleSide })); fl.position.set(sx * L - sx * .18, 1.35, sz * W); scene.add(fl);
+  }));
+})();
+/* goals + nets */
+const netT = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'); x.strokeStyle = 'rgba(255,255,255,.95)'; x.lineWidth = 3; x.beginPath(); x.moveTo(0, 0); x.lineTo(64, 0); x.moveTo(0, 0); x.lineTo(0, 64); x.stroke(); x.lineWidth = 1.2; x.strokeStyle = 'rgba(255,255,255,.35)'; x.beginPath(); x.moveTo(0, 0); x.lineTo(64, 64); x.stroke(); const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; return t; })();
+const netM = new THREE.MeshBasicMaterial({ map: netT, transparent: true, side: THREE.DoubleSide, depthWrite: false, alphaTest: .05 });
+function netSurf(fn, nu, nv) {
+  const pos = [], uv = [], idx = [];
+  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) { const p = fn(i / nu, j / nv); pos.push(p[0], p[1], p[2]); uv.push(i, j); }
+  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) { const a = j * (nu + 1) + i, b = a + 1, c = a + nu + 1, d = c + 1; idx.push(a, b, c, b, d, c); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
+  const m = new THREE.Mesh(g, netM); m.frustumCulled = false; m.base = Float32Array.from(pos); scene.add(m); return m;
+}
+const nets = []; let ripple = null;
 [-1, 1].forEach(s => {
-  const w = mat(0xffffff), gx = s * L;
-  [-GW, GW].forEach(z => { const p = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, 2, 8), w); p.position.set(gx, 1, z); scene.add(p); });
-  const b = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, 2 * GW, 8), w); b.rotation.x = Math.PI / 2; b.position.set(gx, 2, 0); scene.add(b);
-  const np = (pw, ph, x, y, z, ry, rx) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), netM); m.position.set(x, y, z); m.rotation.set(rx || 0, ry || 0, 0); scene.add(m); };
-  np(2 * GW, 2, gx + s * 2.2, 1, 0, Math.PI / 2); np(2.2, 2, gx + s * 1.1, 1, -GW, 0); np(2.2, 2, gx + s * 1.1, 1, GW, 0); np(2.2, 2 * GW, gx + s * 1.1, 2, 0, 0, Math.PI / 2);
-  netM.map.repeat.set(10, 4);
+  const gx = s * L, w = mat(0xffffff);
+  [-GW, GW].forEach(z => { const p = new THREE.Mesh(new THREE.CylinderGeometry(.07, .07, 2, 10), w); p.position.set(gx, 1, z); p.castShadow = SH; scene.add(p); });
+  const b = new THREE.Mesh(new THREE.CylinderGeometry(.07, .07, 2 * GW, 10), w); b.rotation.x = Math.PI / 2; b.position.set(gx, 2, 0); b.castShadow = SH; scene.add(b);
+  nets.push(netSurf((u, v) => [gx + s * (1.1 + (1 - v) * 1.2), v * 2, (u - .5) * 2 * GW * (1 + (1 - v) * .08)], 20, 8));
+  [-1, 1].forEach(zs => netSurf((t, v) => [gx + s * t * (1.1 + (1 - v) * 1.2), v * 2, zs * GW * (1 + t * (1 - v) * .08)], 8, 8));
+  netSurf((t, u) => [gx + s * t * 1.1, 2, (u - .5) * 2 * GW], 8, 20);
+  [-GW, GW].forEach(z => { const g = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, 2.3, 6), w); g.rotation.z = Math.PI / 2; g.position.set(gx + s * 1.15, .03, z); scene.add(g); });
 });
+function startRipple() { const i = bt.x > 0 ? 1 : 0; ripple = { m: nets[i], s: i ? 1 : -1, z: bt.z, y: Math.min(bt.y, 1.8), t: 0 }; }
+function netUpdate(dt) {
+  if (!ripple) return; ripple.t += dt; const m = ripple.m, pos = m.geometry.attributes.position, b = m.base, t = ripple.t;
+  if (t > 1.8) { pos.array.set(b); pos.needsUpdate = true; ripple = null; return; }
+  const dec = Math.exp(-t * 2.2);
+  for (let i = 0; i < pos.count; i++) { const dz = b[i * 3 + 2] - ripple.z, dy = b[i * 3 + 1] - ripple.y; pos.array[i * 3] = b[i * 3] + ripple.s * .8 * Math.exp(-(dz * dz + dy * dy) / 1.4) * dec * Math.sin(t * 16); }
+  pos.needsUpdate = true;
+}
 /* ad boards */
 (function () {
   const c = document.createElement('canvas'); c.width = 512; c.height = 64; const x = c.getContext('2d'); x.fillStyle = '#0d1b2a'; x.fillRect(0, 0, 512, 64); x.fillStyle = '#ffd23f'; x.font = 'bold 40px Arial'; x.textAlign = 'center'; x.fillText('PENALTY OUT', 256, 46);
@@ -98,18 +129,19 @@ for (let q = 0; q < 4; q++) {
 }
 [[-40, -28], [40, -28], [-40, 28], [40, 28]].forEach(([x, z]) => {
   const t = new THREE.Mesh(new THREE.CylinderGeometry(.3, .4, 22, 8), mat(0x555a66)); t.position.set(x * 1.2, 11, z * 1.2); scene.add(t);
-  const h = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 1), new THREE.MeshBasicMaterial({ color: 0xfffbe0 })); h.position.set(x * 1.2, 23, z * 1.2); h.lookAt(0, 8, 0); scene.add(h);
+  const h = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 1), new THREE.MeshBasicMaterial({ color: 0xfffbe0 })); h.position.set(x * 1.2, 23, z * 1.2); h.lookAt(0, 8, 0); scene.add(h); const gl = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xfff2c8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); gl.position.copy(h.position); gl.scale.set(16, 16, 1); scene.add(gl);
 });
 
 /* ball */
-const ball = new THREE.Group(), ballFb = new THREE.Mesh(new THREE.SphereGeometry(BR, 14, 10), mat(0xffffff)); ball.add(ballFb); scene.add(ball);
-const bsh = new THREE.Mesh(new THREE.CircleGeometry(1, 14), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .35, depthWrite: false })); bsh.rotation.x = -Math.PI / 2; scene.add(bsh);
-if (THREE.GLTFLoader) new THREE.GLTFLoader().load('ball.glb', gl => { gl.scene.scale.setScalar(BR / .1132); ball.remove(ballFb); ball.add(gl.scene); }, undefined, () => {});
+const ball = new THREE.Group(), ballFb = new THREE.Mesh(new THREE.SphereGeometry(BR, 14, 10), mat(0xffffff)); ballFb.castShadow = SH; ball.add(ballFb); scene.add(ball);
+const bsh = new THREE.Mesh(new THREE.CircleGeometry(1, 14), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .35, depthWrite: false })); bsh.rotation.x = -Math.PI / 2; bsh.visible = !SH; scene.add(bsh);
+if (THREE.GLTFLoader) new THREE.GLTFLoader().load('ball.glb', gl => { gl.scene.scale.setScalar(BR / .1132); ball.remove(ballFb); ball.add(gl.scene); gl.scene.traverse(o => { if (o.isMesh) o.castShadow = SH; }); }, undefined, () => {});
 
 /* ---------- players ---------- */
 function kitTex(team, num, gk) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 128; const x = c.getContext('2d');
   if (gk) { x.fillStyle = '#c8f031'; x.fillRect(0, 0, 256, 128); x.fillStyle = '#1a1a1a'; for (let i = 0; i < 256; i += 32) x.fillRect(i, 0, 6, 128); }
+  else if (team === 'MJ') { x.fillStyle = '#111'; x.fillRect(0, 0, 256, 128); x.fillStyle = '#d4a017'; for (let i = 0; i < 256; i += 16) x.fillRect(i, 0, 2, 128); x.fillRect(0, 0, 256, 6); }
   else if (team === 'BAR') for (let i = 0; i < 8; i++) { x.fillStyle = i % 2 ? '#004d98' : '#a50044'; x.fillRect(i * 32, 0, 32, 128); }
   else { x.fillStyle = '#f6f6fa'; x.fillRect(0, 0, 256, 128); x.fillStyle = '#d8c06a'; x.fillRect(0, 0, 256, 5); x.fillStyle = '#e4e4ee'; for (let i = 0; i < 256; i += 16) x.fillRect(i, 5, 8, 123); }
   x.fillStyle = gk || team === 'RMA' ? '#222' : '#ffd23f'; x.font = 'bold 58px Arial'; x.textAlign = 'center'; x.fillText(num, 128, 80);
@@ -117,8 +149,8 @@ function kitTex(team, num, gk) {
 }
 function makePlayer(team, num, gk) {
   const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
-  const skin = [0xd9a77a, 0xf1c7a0, 0x8d5a3b, 0xc68642][num % 4], bar = team === 'BAR';
-  const shorts = gk ? 0x111111 : bar ? 0x1a2a6c : 0xf2f2f6, sock = gk ? 0xc8f031 : bar ? 0xa50044 : 0xf6f6fa, sleeve = gk ? 0xc8f031 : bar ? 0xa50044 : 0xf6f6fa;
+  const skin = [0xd9a77a, 0xf1c7a0, 0x8d5a3b, 0xc68642][num % 4], K = { BAR: [0x1a2a6c, 0xa50044, 0xa50044], RMA: [0xf2f2f6, 0xf6f6fa, 0xf6f6fa], MJ: [0x111111, 0xd4a017, 0x151515] }[team];
+  const shorts = gk ? 0x111111 : K[0], sock = gk ? 0xc8f031 : K[1], sleeve = gk ? 0xc8f031 : K[2];
   const torso = new THREE.Mesh(new THREE.CylinderGeometry(.25, .2, .64, 14), new THREE.MeshLambertMaterial({ map: kitTex(team, num, gk) })); torso.scale.z = .62; torso.position.y = 1.25;
   const head = new THREE.Mesh(new THREE.SphereGeometry(.125, 12, 10), mat(skin)); head.position.y = 1.7;
   const hair = new THREE.Mesh(new THREE.SphereGeometry(.135, 12, 6, 0, Math.PI * 2, 0, Math.PI * .55), mat([0x1a1208, 0x3a2512, 0x111111, 0x7a5a2a][num % 4])); hair.position.y = 1.71; hair.rotation.x = -.25;
@@ -151,7 +183,7 @@ function buildPlayers(team, luA) {
   for (let t = 0; t < 2; t++) for (let s = 0; s < 5; s++) {
     const key = team[t], [name, num] = TEAMS[key].r[luA[t].order[s]], g = makePlayer(key, num, s === 0);
     const sh = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: .3, depthWrite: false })); sh.rotation.x = -Math.PI / 2; sh.position.y = .02;
-    scene.add(g, sh); ents.push({ g, sh, t, s, name, num, x: 0, z: 0, a: 0, tx: 0, tz: 0, ta: 0, st: 0, red: 0, sp: 0, ph: Math.random() * 6, kt: 0, pst: 0 });
+    g.traverse(o => { if (o.isMesh) o.castShadow = SH; }); scene.add(g, sh); ents.push({ g, sh, t, s, name, num, x: 0, z: 0, a: 0, tx: 0, tz: 0, ta: 0, st: 0, red: 0, sp: 0, ph: Math.random() * 6, kt: 0, pst: 0 });
   }
 }
 function animate(e, dt, B, celeb) {
@@ -165,6 +197,7 @@ function animate(e, dt, B, celeb) {
     P.hr.rotation.x = u < .35 ? .9 * (u / .35) : .9 - 2.4 * ((u - .35) / .65); P.hr.kn.rotation.x = u < .35 ? .8 : 0; P.al.rotation.z = -.7; P.ar.rotation.z = .7;
   }
   if (e.s === 0 && Math.hypot(B.x - e.x, B.z - e.z) < 2.8 && B.y > .35) { P.al.rotation.z = -2.5; P.ar.rotation.z = 2.5; P.al.rotation.x = P.ar.rotation.x = -.3; P.body.rotation.z = clamp((B.z - e.z) * .1, -.4, .4) * Math.sign(Math.cos(e.a) || 1); }
+  if (e.st === 4) { e.g.position.y = .45; P.body.rotation.x = -.25; P.al.rotation.z = -1.2; P.ar.rotation.z = 1.2; P.hl.rotation.x = .3; P.hr.rotation.x = -.3; }
   if (e.st === 3) { const sg = Math.sign(e.vz || 0), lx = -Math.sin(e.g.rotation.y) * sg; e.g.position.y = .35; P.body.rotation.z = -(Math.sign(lx) || 1) * 1.25 * (sg ? 1 : 0); P.al.rotation.z = -2.6; P.ar.rotation.z = 2.6; }
   if (celeb === e.t) { e.g.position.y = Math.abs(Math.sin(e.ph * 2)) * .35; P.al.rotation.z = -2.6; P.ar.rotation.z = 2.6; }
   e.pst = e.st;
@@ -189,9 +222,9 @@ function camMode() {
 }
 function press(a) {
   if (S && S.rs && S.rs.k === 'penalty' && S.pn && S.rs.t !== me) { if (a === 'shoot' || a === 'pass') { const [sx, sy] = stick(); act('dive', 0, { dir: sx > .3 ? 1 : sx < -.3 ? -1 : 0, hi: sy > .3 }); } return; }
-  if (a === 'pass') act('pass'); else if (a === 'tk') act('tk'); else if (a === 'sw') act('sw'); else if (a === 'shoot') startCharge(); else if (a === 'sprint') spBtn = true; }
+  if (a === 'pass') act('pass'); else if (a === 'cross') act('cross'); else if (a === 'tk') act('tk'); else if (a === 'sw') act('sw'); else if (a === 'shoot') startCharge(); else if (a === 'sprint') spBtn = true; }
 function unpress(a) { if (a === 'shoot') release(); else if (a === 'sprint') spBtn = false; }
-const KM = { KeyF: 'pass', KeyJ: 'pass', Space: 'shoot', KeyK: 'shoot', KeyC: 'tk', KeyL: 'tk', KeyV: 'sw', Tab: 'sw' };
+const KM = { KeyE: 'cross', KeyU: 'cross', KeyF: 'pass', KeyJ: 'pass', Space: 'shoot', KeyK: 'shoot', KeyC: 'tk', KeyL: 'tk', KeyV: 'sw', Tab: 'sw' };
 addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (KM[e.code] || e.code.startsWith('Arrow')) e.preventDefault(); if (e.repeat) return; keys[e.code] = 1; if (KM[e.code]) press(KM[e.code]); });
 addEventListener('keyup', e => { keys[e.code] = 0; if (KM[e.code]) unpress(KM[e.code]); });
 document.querySelectorAll('#fb button').forEach(b => { const a = b.dataset.a; b.addEventListener('pointerdown', e => { e.preventDefault(); b.classList.add('p'); press(a); }); ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => b.addEventListener(n, e => { e.preventDefault(); if (b.classList.contains('p')) { b.classList.remove('p'); unpress(a); } })); });
@@ -220,20 +253,27 @@ sock.on('room', d => {
   if (d.ph === 'lineup') { if (!luInit) { luInit = true; lu = { form: '2-1-1', order: [0, 1, 2, 3, 4] }; luSel = -1; show('lineup'); renderLU(); } $('lumsg').textContent = d.rdy[me] ? 'Waiting for opponent…' : ''; $('bStart').disabled = !!d.rdy[me]; return; }
   if (d.ph !== 'lobby') return;
   const both = d.on[0] && d.on[1], mine = d.rdy[me], opp = d.rdy[1 - me] ? d.team[1 - me] : null;
-  if (opp && myTeam === opp && !mine) { myTeam = opp === 'BAR' ? 'RMA' : 'BAR'; sock.emit('team', myTeam); }
+  if (opp && myTeam === opp && !mine) { myTeam = Object.keys(TEAMS).find(k => k !== opp); sock.emit('team', myTeam); }
   $('lt').classList.toggle('hide', !both);
   document.querySelectorAll('.team').forEach(b => { b.classList.toggle('sel', b.dataset.t === myTeam); b.classList.toggle('off', b.dataset.t === opp || !!mine); });
   $('bReady').disabled = !both || !!mine;
   $('lmsg').textContent = !both ? 'Waiting for your opponent to join…' : mine ? 'Waiting for your opponent…' : opp ? 'Opponent picked ' + TEAMS[opp].n + '. Choose yours and press Ready.' : 'Both connected. Choose your team and press Ready.';
 });
+const getF = l => l.form === 'custom' ? l.pos : FORMS[l.form];
+function drawPrev() { $('prev').innerHTML = getF(lu).map((f, i) => `<i class="${i ? '' : 'gk'}" style="left:${(f[0] + 1) / 2 * 100}%;top:${(f[1] + 1) / 2 * 100}%">${i ? i : 'GK'}</i>`).join(''); }
 function renderLU() {
-  const my = room ? room.team[me] : myTeam;
-  $('forms').innerHTML = Object.keys(FORMS).map(f => `<button data-f="${f}" class="${f === lu.form ? 'sel' : ''}">${f}</button>`).join('');
-  $('slots').innerHTML = FORMS[lu.form].map((f, s) => { const [n, num] = TEAMS[my].r[lu.order[s]]; return `<button data-s="${s}" class="${s === luSel ? 'sel' : ''} ${s === 0 ? 'lock' : ''}"><span>${lab(f)}</span><span>${n} #${num}</span></button>`; }).join('');
-  document.querySelectorAll('#forms button').forEach(b => b.onclick = () => { lu.form = b.dataset.f; sock.emit('lineup', lu); renderLU(); });
-  document.querySelectorAll('#slots button').forEach(b => b.onclick = () => {
-    const s = +b.dataset.s; if (s === 0) return; if (luSel < 0) luSel = s; else { if (luSel !== s) { const o = lu.order; [o[luSel], o[s]] = [o[s], o[luSel]]; sock.emit('lineup', lu); } luSel = -1; } renderLU();
+  const my = room ? room.team[me] : myTeam, F = getF(lu);
+  $('forms').innerHTML = Object.keys(FORMS).concat('custom').map(f => `<button data-f="${f}" class="${f === lu.form ? 'sel' : ''}">${f === 'custom' ? 'CUSTOM' : f}</button>`).join('');
+  $('slots').innerHTML = F.map((f, i) => { const [n, num] = TEAMS[my].r[lu.order[i]]; return `<div class="srow"><button data-s="${i}" class="${i === luSel ? 'sel' : ''} ${i === 0 ? 'lock' : ''}"><span>${lab(f)}</span><span>${n} #${num}</span></button>${lu.form === 'custom' && i ? `<span class="sl"><input type="range" data-s="${i}" data-k="0" min="-80" max="70" value="${Math.round(f[0] * 100)}"><input type="range" data-s="${i}" data-k="1" min="-80" max="80" value="${Math.round(f[1] * 100)}"></span>` : ''}</div>`; }).join('');
+  drawPrev();
+  document.querySelectorAll('#forms button').forEach(b => b.onclick = () => {
+    if (b.dataset.f === 'custom') { if (lu.form !== 'custom') lu.pos = FORMS[lu.form].map(q => q.slice()); lu.form = 'custom'; } else { lu.form = b.dataset.f; delete lu.pos; }
+    sock.emit('lineup', lu); renderLU();
   });
+  document.querySelectorAll('#slots button').forEach(b => b.onclick = () => {
+    const i = +b.dataset.s; if (i === 0) return; if (luSel < 0) luSel = i; else { if (luSel !== i) { const o = lu.order; [o[luSel], o[i]] = [o[i], o[luSel]]; sock.emit('lineup', lu); } luSel = -1; } renderLU();
+  });
+  document.querySelectorAll('#slots input').forEach(inp => { inp.oninput = () => { lu.pos[+inp.dataset.s][+inp.dataset.k] = inp.value / 100; drawPrev(); }; inp.onchange = () => sock.emit('lineup', lu); });
 }
 $('bStart').onclick = () => { sock.emit('lineup', lu); sock.emit('ready'); $('bStart').disabled = true; };
 sock.on('start', d => {
@@ -256,9 +296,12 @@ sock.on('ev', list => list.forEach(e => {
   else if (e.k === 'save') { beep(200, .25, 'sawtooth', .12); crowd(.22, 700, 2.5); }
   else if (e.k === 'win') beep(240, .1, 'triangle', .12);
   else if (e.k === 'restart') { beep(2400, .25, 'square', .05); if (e.type !== 'kickoff') banner(RS[e.type]); }
-  else if (e.k === 'goal') { celeb = e.t; celebT = 3.2; banner(e.t === me ? 'GOAL!' : 'GOAL FOR OPPONENT', e.t === me ? '#2ecc71' : '#e63946'); [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)); crowd(.45, 1000, 4.5); }
+  else if (e.k === 'goal') { startRipple(); celeb = e.t; celebT = 3.2; banner(e.t === me ? 'GOAL!' : 'GOAL FOR OPPONENT', e.t === me ? '#2ecc71' : '#e63946'); [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)); crowd(.45, 1000, 4.5); }
   else if (e.k === 'foul') { beep(2400, .5, 'square', .06); banner(e.card === 'r' ? 'RED CARD' : e.card === 'y' ? 'YELLOW CARD' : e.pen ? 'FOUL — PENALTY' : 'FOUL', e.card === 'r' ? '#e63946' : '#ffd23f'); crowd(.2, 450, 2.5); }
   else if (e.k === 'penres') { if (e.res !== 'goal') banner(e.res === 'save' ? 'SAVED!' : e.res === 'post' ? 'OFF THE POST!' : 'MISSED!', '#e63946'); }
+  else if (e.k === 'head' || e.k === 'volley') beep(260, .1, 'triangle', .25);
+  else if (e.k === 'cross') beep(420, .25, 'triangle', .15);
+  else if (e.k === 'post') { beep(1100, .2, 'square', .12); crowd(.2, 900, 1.5); }
   else if (e.k === 'half') { banner('HALF TIME', '#ffd23f'); beep(2000, .8, 'square', .06); }
   else if (e.k === 'end') { $('hud').classList.add('hide'); $('fpad').classList.add('hide'); $('menu').classList.remove('off'); show('end'); sessionStorage.removeItem('pof'); const a = e.score[me], b = e.score[1 - me]; $('endT').textContent = `${a > b ? 'YOU WIN' : a < b ? 'YOU LOSE' : 'DRAW'}  ${a} – ${b}`; }
 }));
@@ -282,7 +325,7 @@ function loop(now) {
   const k = Math.min(1, dt * 14);
   ents.forEach(e => {
     e.x += (e.tx - e.x) * k; e.z += (e.tz - e.z) * k; let da = e.ta - e.a; da = Math.atan2(Math.sin(da), Math.cos(da)); e.a += da * Math.min(1, dt * 12);
-    e.g.visible = e.sh.visible = !e.red; e.g.position.x = e.x; e.g.position.z = e.z; e.g.rotation.y = Math.atan2(Math.cos(e.a), Math.sin(e.a));
+    e.g.visible = !e.red; e.sh.visible = !e.red && !SH; e.g.position.x = e.x; e.g.position.z = e.z; e.g.rotation.y = Math.atan2(Math.cos(e.a), Math.sin(e.a));
     e.sh.position.x = e.x; e.sh.position.z = e.z; animate(e, dt, bt, celebT > 0 ? celeb : -1);
   });
   const bk = Math.min(1, dt * (Bl.o >= 0 ? 22 : 18)), px = ball.position.x, pz = ball.position.z;
@@ -292,14 +335,15 @@ function loop(now) {
   const ce = S && ents[S.k[me]]; ring.visible = arrow.visible = !!ce;
   if (ce) { ring.position.x = ce.x; ring.position.z = ce.z; arrow.position.set(ce.x, 2.25 + Math.sin(now / 200) * .08, ce.z); }
   dmCur += (dmv - dmCur) * Math.min(1, dt * 2);
-  const bx = ball.position.x, bz = ball.position.z, V = THREE.Vector3; let tgt, look, kk = Math.min(1, dt * 2.5);
+  const bx = ball.position.x, bz = ball.position.z, V = THREE.Vector3; let tgt, look, kk = Math.min(1, dt * 3.5);
   if (cm.m === 'pk') { tgt = new V(S.b[0] - cm.d * 5, 2, 0); look = new V(cm.d * L, 1, 0); kk = Math.min(1, dt * 4); }
   else if (cm.m === 'pg') { tgt = new V(cm.d * (L + 4.5), 2.7, 0); look = new V(cm.d * (L - 6), .9, 0); kk = Math.min(1, dt * 4); }
   else if (cm.m === 'fk') { const gx = dmv * L, dx = gx - bx, dz = -bz, n = Math.hypot(dx, dz) || 1; tgt = new V(bx - dx / n * 5, 2.3, bz - dz / n * 5); look = new V(gx, 1, 0); kk = Math.min(1, dt * 4); }
-  else { tgt = new V(clamp(bx * .75, -17, 17), cam.aspect < 1 ? 22 : 15.5, dmCur * (cam.aspect < 1 ? 26 : 21)); look = new V(clamp(bx * .85, -21, 21), 0, 0); }
+  else { const q = Math.max(0, bz * dmCur), asp = cam.aspect < 1; tgt = new V(clamp(bx * .8, -19, 19), (asp ? 22 : 15.5) + q * .25, dmCur * ((asp ? 26 : 21) + q * .9)); look = new V(clamp(bx * .85, -22, 22), 0, bz * .55); }
   camPos.lerp(tgt, kk); camLook.lerp(look, kk); cam.position.copy(camPos); cam.lookAt(camLook);
   const cr = $('cross'); cr.classList.toggle('hide', cm.m !== 'pk');
   if (cm.m === 'pk') { tmpV.set(cm.d * L, .15 + S.pn[2] * 1.9, S.pn[1]).project(cam); cr.style.left = (tmpV.x * .5 + .5) * innerWidth + 'px'; cr.style.top = (-tmpV.y * .5 + .5) * innerHeight + 'px'; }
+  netUpdate(dt);
   R.render(scene, cam);
 }
 requestAnimationFrame(loop);

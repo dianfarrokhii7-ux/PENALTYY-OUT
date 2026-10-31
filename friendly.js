@@ -5,6 +5,8 @@ const FORMS = {
   '1-2-1': [[-.92, 0], [-.55, 0], [-.1, -.55], [-.1, .55], [.45, 0]],
   '1-1-2': [[-.92, 0], [-.55, 0], [-.15, 0], [.45, -.4], [.45, .4]]
 };
+const TK = ['BAR', 'RMA', 'MJ'];
+const formOf = (r, t) => { const q = r.lu[t]; return q.form === 'custom' && q.pos ? q.pos : FORMS[q.form]; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), hyp = Math.hypot, rnd = Math.random, rd = v => Math.round(v * 100) / 100;
 const dirOf = (r, t) => (t ? -1 : 1) * (r.flip ? -1 : 1);
 
@@ -19,7 +21,7 @@ function start(r) {
   r.score = [0, 0]; r.half = 1; r.clock = HALF; r.flip = false; r.ctrl = [4, 9]; kickoff(r, 0);
 }
 function place(r) {
-  for (const p of r.P) { if (p.red) continue; const d = dirOf(r, p.t), f = FORMS[r.lu[p.t].form][p.s];
+  for (const p of r.P) { if (p.red) continue; const d = dirOf(r, p.t), f = formOf(r, p.t)[p.s];
     p.x = Math.min(f[0], -.12) * L * d; p.z = f[1] * W; p.vx = p.vz = 0; p.fx = d; p.fz = 0; p.st = 0; }
 }
 function kickoff(r, t) { place(r); setRestart(r, 'kickoff', t, 0, 0); }
@@ -45,12 +47,30 @@ function pass(r, p, dx, dz) {
   let best = null, bs = .45;
   for (const q of r.P) if (q.t === p.t && q !== p && !q.red) {
     const ex = q.x - p.x, ez = q.z - p.z, dd = hyp(ex, ez) || 1, c = (ex * dx + ez * dz) / dd, s = c - dd * .012;
-    if (c > .55 && s > bs) { bs = s; best = q; }
+    if (c > .5 && s > bs) { bs = s; best = q; }
   }
   const B = r.ball; let tx, tz, sp;
-  if (best) { const dd = hyp(best.x - p.x, best.z - p.z); tx = best.x + best.vx * .35; tz = best.z + best.vz * .35; sp = clamp(7 + dd * 1.1, 9, 19); if (r.on[p.t] && r.ctrl[p.t] === p.i && best.s) r.ctrl[p.t] = best.i; }
+  if (best) { const dd = hyp(best.x - p.x, best.z - p.z); sp = clamp(10 + dd * 1.6, 13, 27); const tt = dd / sp; tx = best.x + best.vx * tt * .85; tz = best.z + best.vz * tt * .85; if (r.on[p.t] && r.ctrl[p.t] === p.i && best.s) r.ctrl[p.t] = best.i; }
   else { tx = B.x + dx * 12; tz = B.z + dz * 12; sp = 11; }
   const ex = tx - B.x, ez = tz - B.z, e = hyp(ex, ez) || 1; kick(r, p, ex / e * sp, ez / e * sp, 0);
+}
+function cross(r, p, dx, dz) {
+  const B = r.ball, d = dirOf(r, p.t); let n = hyp(dx, dz), tm = null, bs = -9;
+  if (n > .2) { dx /= n; dz /= n; for (const q of r.P) if (q.t === p.t && q !== p && !q.red && q.s > 0) { const ex = q.x - B.x, ez = q.z - B.z, dd = hyp(ex, ez) || 1, c = (ex * dx + ez * dz) / dd; if (c > .6 && dd > 5 && c - dd * .01 > bs) { bs = c - dd * .01; tm = q; } } }
+  if (!tm) { let bd = 1e9; for (const q of r.P) if (q.t === p.t && q !== p && !q.red && q.s > 0) { const dd = hyp(q.x - d * (L - 5), q.z); if (dd < bd) { bd = dd; tm = q; } } if (bd > 8) tm = null; }
+  let tx, tz; if (tm) { tx = tm.x + tm.vx * .6; tz = tm.z + tm.vz * .6; if (r.on[p.t] && r.ctrl[p.t] === p.i) r.ctrl[p.t] = tm.i; } else { tx = d * (L - 5); tz = (rnd() - .5) * 5; }
+  const ex = tx - B.x, ez = tz - B.z, T = clamp((hyp(ex, ez) || 1) / 13, .8, 1.7);
+  kick(r, p, ex / T * 1.03, ez / T * 1.03, 4.9 * T); r.ev.push({ k: 'cross' });
+}
+function aerial(r, p, a, i) {
+  const B = r.ball, d = dirOf(r, p.t), pw = clamp(+a.p || .5, .2, 1);
+  if (a.t === 'shoot') {
+    const az = clamp(i.mz * 2.4, -2.2, 2.2);
+    if (rnd() < .15) { shoot(r, p, Math.max(pw, .7), az); r.ev.push({ k: 'volley' }); return; }
+    const ex = d * L - B.x, ez = az + (rnd() - .5) * 1.2 * (1 - pw * .5) - B.z, e = hyp(ex, ez) || 1, sp = 10 + pw * 11;
+    kick(r, p, ex / e * sp, ez / e * sp, pw * .8 - .3); r.ev.push({ k: 'head' });
+  } else { pass(r, p, i.mx, i.mz); r.ev.push({ k: 'head' }); }
+  p.st = 4; p.stt = .45;
 }
 function shoot(r, p, pw, az) {
   const B = r.ball, gx = dirOf(r, p.t) * L, j = (rnd() - .5) * pw * pw * 1.6, ex = gx - B.x, ez = clamp(az + j, -3.2, 3.2) - B.z, e = hyp(ex, ez) || 1, sp = 13 + pw * 15;
@@ -81,9 +101,12 @@ function act(r, t, a) {
     return;
   }
   if (a.t === 'sw') return swit(r, t);
-  const can = B.o === p.i || (r.ph === 'dead' && r.rs && r.rs.taker === p.i);
+  const nearB = B.o < 0 && r.ph === 'play' && hyp(B.x - p.x, B.z - p.z) < (B.y > .5 ? 2 : 1.4);
+  if (nearB && B.y > .5 && ['shoot', 'pass', 'cross'].includes(a.t)) return aerial(r, p, a, i);
+  const can = B.o === p.i || (r.ph === 'dead' && r.rs && r.rs.taker === p.i) || nearB;
   if (can && a.t === 'pass') pass(r, p, i.mx, i.mz);
-  else if (can && a.t === 'shoot') shoot(r, p, clamp(+a.p || .5, .2, 1), clamp(i.mz * 2.4, -2.2, 2.2));
+  else if (can && a.t === 'cross') cross(r, p, i.mx, i.mz);
+  else if (can && a.t === 'shoot') { if (r.rs && r.rs.type === 'kickoff' && r.ph === 'dead') pass(r, p, i.mx, i.mz); else shoot(r, p, clamp(+a.p || .5, .2, 1), clamp(i.mz * 2.4, -2.2, 2.2)); }
   else if (!can && a.t === 'tk') tackle(r, p);
 }
 function aim(p, tx, tz, sp) { const dx = tx - p.x, dz = tz - p.z, n = hyp(dx, dz); return n < .35 || !sp ? [0, 0] : [dx / n * sp * Math.min(1, n / 1.5), dz / n * sp * Math.min(1, n / 1.5)]; }
@@ -126,11 +149,12 @@ function ai(r, p) {
   if (dead && rs.taker === p.i) return [0, 0];
   if (p.s === 0) return gk(r, p, d);
   if (!r.on[p.t]) return aiFull(r, p);
-  const f = FORMS[r.lu[p.t].form][p.s], hx = f[0] * L * d, hz = f[1] * W, mine = B.o >= 0 && r.P[B.o].t === p.t, theirs = B.o >= 0 && !mine;
+  const f = formOf(r, p.t)[p.s], hx = f[0] * L * d, hz = f[1] * W, mine = B.o >= 0 && r.P[B.o].t === p.t, theirs = B.o >= 0 && !mine;
   const ax = f[0] < -.3 ? 5 : 7, az = 7; let tx = B.x, tz = B.z * .8;
   if (mine) { tx = hx + d * ax; tz = hz; } else if (theirs) tx = hx - d * ax * .6;
   tx = clamp(tx, hx - ax, hx + ax); tz = clamp(tz, hz - az, hz + az);
   if (dead && p.t !== rs.team && hyp(tx - B.x, tz - B.z) < 6) { const n = hyp(p.x - B.x, p.z - B.z) || 1; tx = B.x + (p.x - B.x) / n * 6; tz = B.z + (p.z - B.z) / n * 6; }
+  if (B.o < 0 && !dead) { const dd = hyp(B.x - p.x, B.z - p.z); if (dd < 6) { tx = clamp(B.x + B.vx * .25, hx - ax - 3, hx + ax + 3); tz = clamp(B.z + B.vz * .25, hz - az - 3, hz + az + 3); } }
   if (r.pen) { const dp = r.pen.d; if (dp * tx > L - 9.5) tx = dp * (L - 9.5); }
   return aim(p, tx, tz, 5.2);
 }
@@ -176,7 +200,7 @@ function penTick(r) {
 function aiFull(r, p) {
   const B = r.ball, d = dirOf(r, p.t), dead = r.ph === 'dead', rs = r.rs;
   if (dead && rs.taker === p.i) return [0, 0];
-  const opp = r.P.filter(q => q.t !== p.t && !q.red), f = FORMS[r.lu[p.t].form][p.s];
+  const opp = r.P.filter(q => q.t !== p.t && !q.red), f = formOf(r, p.t)[p.s];
   if (B.o === p.i && r.ph === 'play') {
     p.th -= DT; const gx = d * L;
     if (p.th <= 0) {
@@ -213,7 +237,7 @@ function tick(r) {
   }
   if (r.ph === 'dead' && r.pen) penTick(r);
   else if (r.ph === 'dead') { r.rs.t += DT; const t = r.rs.team, tk = r.P[r.rs.taker], hum = r.on[t] && r.ctrl[t] === tk.i;
-    if (r.rs.t > (hum ? 9 : 1.6)) { const d = dirOf(r, t), ty = r.rs.type; if (ty === 'penalty' || (ty === 'freekick' && hyp(d * L - B.x, B.z) < 14)) shoot(r, tk, .75, (rnd() < .5 ? -1.7 : 1.7)); else pass(r, tk, d, (rnd() - .5) * .6); } }
+    if (r.rs.t > (hum ? 9 : 1.6)) { const d = dirOf(r, t), ty = r.rs.type; if (ty === 'penalty' || (ty === 'freekick' && hyp(d * L - B.x, B.z) < 14)) shoot(r, tk, .75, (rnd() < .5 ? -1.7 : 1.7)); else if (ty === 'corner') cross(r, tk, 0, 0); else pass(r, tk, d, (rnd() - .5) * .6); } }
   for (let t = 0; t < 2; t++) { let b = -1, bd = 1e9; for (const q of r.P) if (q.t === t && q.s > 0 && !q.red && !(r.on[t] && r.ctrl[t] === q.i)) { const dd = hyp(q.x - B.x, q.z - B.z); if (dd < bd) { bd = dd; b = q.i; } } r.chase[t] = b; }
   for (const p of r.P) {
     if (p.red) continue; p.tk = Math.max(0, p.tk - DT); p.kk = Math.max(0, p.kk - DT); p.stun = Math.max(0, p.stun - DT);
@@ -224,7 +248,7 @@ function tick(r) {
       if (n > .1) { if (frozen) { p.fx = i.mx / n; p.fz = i.mz / n; } else { const s = (i.sp ? 7.6 : 6) * Math.min(1, n) * (B.o === p.i ? .93 : 1); wx = i.mx / n * s; wz = i.mz / n * s; } }
     } else { const a = ai(r, p); wx = a[0]; wz = a[1]; }
     if (p.st === 1) { p.stt -= DT; if (p.stt <= 0) p.st = 0; const k = p.stt > .12 ? 8.5 : 2; wx = p.fx * k; wz = p.fz * k; }
-    else if (p.st === 2 || p.st === 3) { p.stt -= DT; if (p.stt <= 0) p.st = 0; }
+    else if (p.st >= 2 && p.st <= 4) { p.stt -= DT; if (p.stt <= 0) p.st = 0; }
     if (p.stun > 0) { wx *= .2; wz *= .2; }
     p.vx += (wx - p.vx) * Math.min(1, DT * 9); p.vz += (wz - p.vz) * Math.min(1, DT * 9);
     p.x = clamp(p.x + p.vx * DT, -L - 3, L + 3); p.z = clamp(p.z + p.vz * DT, -W - 2, W + 2);
@@ -239,30 +263,39 @@ function tick(r) {
   for (let a = 0; a < 10; a++) for (let b = a + 1; b < 10; b++) { const p = r.P[a], q = r.P[b]; if (p.red || q.red) continue; const dx = q.x - p.x, dz = q.z - p.z, dd = hyp(dx, dz); if (dd < .7 && dd > .001) { const k = (.7 - dd) / 2 / dd; p.x -= dx * k; p.z -= dz * k; q.x += dx * k; q.z += dz * k; } }
   /* ball */
   if (B.o >= 0) {
-    const p = r.P[B.o]; if (p.red) { B.o = -1; } else { B.x = p.x + p.fx * .7; B.z = p.z + p.fz * .7; B.y = BR; B.vx = p.vx; B.vz = p.vz; B.vy = 0; }
+    const p = r.P[B.o]; if (p.red) { B.o = -1; } else { B.x = p.x + p.fx * .7; B.z = p.z + p.fz * .7; B.y = BR; B.vx = p.vx; B.vz = p.vz; B.vy = 0; r.last = p.t; }
   } else {
-    B.rt += DT; B.vy -= 9.8 * DT; B.x += B.vx * DT; B.y += B.vy * DT; B.z += B.vz * DT;
+    B.rt += DT; B.px = B.x; B.py = B.y; B.pz = B.z; B.vy -= 9.8 * DT; B.x += B.vx * DT; B.y += B.vy * DT; B.z += B.vz * DT;
     if (B.y < BR) { B.y = BR; B.vy = Math.abs(B.vy) > 1.2 ? -B.vy * .55 : 0; }
     const g = B.y <= BR + .01 ? 1.3 : .1; B.vx *= 1 - g * DT; B.vz *= 1 - g * DT;
     if (r.ph === 'goal' || (Math.abs(B.z) < GW + .3 && Math.abs(B.x) > L)) { if (Math.abs(B.x) > L + 2.2) { B.x = Math.sign(B.x) * (L + 2.2); B.vx *= -.1; } }
     if (r.ph === 'play') {
       for (const p of r.P) {
         if (p.red || p.kk > 0 || p.stun > 0) continue; const gk = p.s === 0, dd = hyp(p.x - B.x, p.z - B.z), sp = hyp(B.vx, B.vz);
-        if (dd < (gk ? (p.st === 3 ? 1.15 : .95) : .8) && B.y < (gk ? 2.2 : .9)) {
+        if (dd < (gk ? (p.st === 3 ? 1.15 : .95) : .95) && B.y < (gk ? 2.2 : 2.1)) {
           if (gk) { if (rnd() > (sp < 14 ? .92 : sp < 22 ? .5 : .22)) { B.vx *= -.3; B.vz += (rnd() - .5) * 7; B.vy = 2; r.last = p.t; p.kk = .4; r.ev.push({ k: 'save' }); break; } }
           else if (sp >= 22) continue;
+          if (!gk && B.y >= .9) { p.st = 4; p.stt = .4; r.ev.push({ k: 'head' }); }
           B.o = p.i; B.vx = B.vz = 0; r.last = p.t; p.hold = 1.2; if (gk) r.ev.push({ k: 'save' }); if (r.on[p.t] && p.s) r.ctrl[p.t] = p.i; break;
         }
       }
-      if (B.o < 0) {
-        if (Math.abs(B.x) > L) {
-          const end_ = Math.sign(B.x);
-          if (Math.abs(B.z) < GW && B.y < 2) end(r, dirOf(r, 0) === end_ ? 0 : 1);
-          else { const def = dirOf(r, 0) === -end_ ? 0 : 1; if (r.last === def) setRestart(r, 'corner', 1 - def, end_ * L, Math.sign(B.z || 1) * W); else setRestart(r, 'goalkick', def, end_ * (L - 2), 0); }
-        } else if (Math.abs(B.z) > W) setRestart(r, 'throwin', 1 - r.last, B.x, Math.sign(B.z) * W);
-      }
     }
   }
+  if (r.ph === 'play') outCheck(r);
+}
+function outCheck(r) {
+  const B = r.ball;
+  if (B.o < 0 && B.px !== undefined && Math.abs(B.x) > L && Math.abs(B.px) <= L) {
+    const sg = Math.sign(B.x), f = (L - Math.abs(B.px)) / ((Math.abs(B.x) - Math.abs(B.px)) || 1), zc = B.pz + (B.z - B.pz) * f, yc = B.py + (B.y - B.py) * f;
+    if (Math.abs(Math.abs(zc) - GW) < .1 && yc < 2.05) { B.x = sg * (L - .1); B.vx *= -.45; B.vz += (rnd() - .5) * 3; r.ev.push({ k: 'post' }); return; }
+    if (Math.abs(yc - 2) < .1 && Math.abs(zc) < GW) { B.x = sg * (L - .1); B.vx *= -.45; B.vy = -Math.abs(B.vy) * .5; r.ev.push({ k: 'post' }); return; }
+  }
+  if (Math.abs(B.x) > L) {
+    const e = Math.sign(B.x);
+    if (Math.abs(B.z) < GW && B.y < 2) { end(r, dirOf(r, 0) === e ? 0 : 1); return; }
+    const def = dirOf(r, 0) === -e ? 0 : 1;
+    if (r.last === def) setRestart(r, 'corner', 1 - def, e * L, Math.sign(B.z || 1) * W); else setRestart(r, 'goalkick', def, e * (L - 2), 0);
+  } else if (Math.abs(B.z) > W) setRestart(r, 'throwin', 1 - r.last, clamp(B.x, -L + 1, L - 1), Math.sign(B.z) * W);
 }
 function snap(r) {
   const B = r.ball;
@@ -286,15 +319,17 @@ function attach(io) {
       r.sk[i] = s.id; r.on[i] = true; s.join(code); s.data = { c: code, i }; s.emit('joined', { code, i, token }); ns.to(code).emit('room', pub(r));
       if (!['lobby', 'lineup'].includes(r.ph)) s.emit('start', { team: r.team, lu: r.lu });
     });
-    s.on('team', t => { const r = R(s); if (!r || r.ph !== 'lobby' || r.rdy[s.data.i]) return; const i = s.data.i; if (r.rdy[1 - i] && r.team[1 - i] === t) return; r.team[i] = t === 'RMA' ? 'RMA' : 'BAR'; ns.to(r.code).emit('room', pub(r)); });
+    s.on('team', t => { const r = R(s); if (!r || r.ph !== 'lobby' || r.rdy[s.data.i]) return; const i = s.data.i; if (r.rdy[1 - i] && r.team[1 - i] === t) return; r.team[i] = TK.includes(t) ? t : 'BAR'; ns.to(r.code).emit('room', pub(r)); });
     s.on('lineup', d => {
-      const r = R(s); if (!r || r.ph !== 'lineup' || r.rdy[s.data.i]) return; const o = d && d.order;
-      if (FORMS[d && d.form] && Array.isArray(o) && o.length === 5 && [0, 1, 2, 3, 4].every(k => o.includes(k)) && o[0] === 0) r.lu[s.data.i] = { form: d.form, order: o.map(Number) };
+      const r = R(s); if (!r || r.ph !== 'lineup' || r.rdy[s.data.i] || !d) return; const o = d.order;
+      if (!(Array.isArray(o) && o.length === 5 && [0, 1, 2, 3, 4].every(k => o.includes(k)) && o[0] === 0)) return;
+      if (d.form === 'custom' && Array.isArray(d.pos) && d.pos.length === 5) r.lu[s.data.i] = { form: 'custom', pos: d.pos.map((q, k) => k === 0 ? [-.92, 0] : [clamp(+(q && q[0]) || 0, -.8, .7), clamp(+(q && q[1]) || 0, -.8, .8)]), order: o.map(Number) };
+      else if (FORMS[d.form]) r.lu[s.data.i] = { form: d.form, order: o.map(Number) };
     });
     s.on('ready', () => {
       const r = R(s); if (!r || !r.on[0] || !r.on[1]) return; r.rdy[s.data.i] = true;
       if (r.rdy[0] && r.rdy[1]) {
-        if (r.ph === 'lobby') { if (r.team[0] === r.team[1]) r.team[1] = r.team[0] === 'BAR' ? 'RMA' : 'BAR'; r.ph = 'lineup'; r.rdy = [false, false]; }
+        if (r.ph === 'lobby') { if (r.team[0] === r.team[1]) r.team[1] = TK.find(k => k !== r.team[0]); r.ph = 'lineup'; r.rdy = [false, false]; }
         else if (r.ph === 'lineup') { start(r); ns.to(r.code).emit('start', { team: r.team, lu: r.lu }); }
       }
       ns.to(r.code).emit('room', pub(r));
