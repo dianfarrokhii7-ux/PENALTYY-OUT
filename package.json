@@ -1,13 +1,22 @@
 {
   "name": "penalty-out",
-  "version": "6.0.0",
+  "version": "7.0.0",
   "description": "PENALTY OUT - online 3D penalty shootout + 6v6 friendly match",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/sim.js && node test/dribble.js && node test/integration.js"
+    "check": "node --check server.js && node --check friendly.js && node --check shared.js && node --check lineup.js && node --check game.js && node --check friendly-game.js",
+    "test": "npm run check && node test/squads.js && node test/lineup.js && node test/sim.js && node test/dribble.js && node test/integration.js",
+    "lint": "npx eslint ."
   },
-  "engines": { "node": ">=18" },
-  "dependencies": { "express": "^4.19.2", "socket.io": "^4.7.5" },
-  "devDependencies": { "socket.io-client": "^4.7.5" }
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.5"
+  }
 }

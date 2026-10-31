@@ -38,7 +38,7 @@ const sfx = { whistle: () => { beep(2400, .35, 'square', .06); }, kick: () => be
 
 /* ---------- three.js scene ---------- */
 const canvas = $('c');
-const R = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const R = new THREE.WebGLRenderer({ canvas, antialias: !(matchMedia('(pointer:coarse)').matches && (devicePixelRatio || 1) >= 2), powerPreference: 'high-performance' });
 const QL = POF.Quality(R, Math.min(devicePixelRatio || 1, 2), 1);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a1830); scene.fog = new THREE.Fog(0x0a1830, 45, 110);

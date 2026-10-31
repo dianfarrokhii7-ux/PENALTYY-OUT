@@ -42,9 +42,8 @@
     <button class="big" id="bReady" disabled>Ready</button><p class="sub" id="lmsg"></p>
   </div>
   <div id="lineup" class="screen hide wide">
-    <h2>Line-up</h2><p class="sub">Pick a formation. Tap two players to swap positions, or a player and a bench player to bring him on.</p>
-    <div class="row" id="forms"></div><div id="prev"></div><div id="slots"></div>
-    <h4>Bench</h4><div id="bench" class="plist"></div>
+    <h2>Line-up</h2><p class="sub">Drag players on the pitch to build your own system. Tap two players to swap, or a player and a bench player to bring him on.</p>
+    <div id="editor"></div>
     <button class="big" id="bStart">Start match</button><p class="sub" id="lumsg"></p>
   </div>
   <div id="end" class="screen hide"><h2 id="endT"></h2><div id="endStats"></div><button class="big" onclick="location.href='/friendly.html'">Back to menu</button></div>
@@ -52,5 +51,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="shared.js"></script>
+<script src="lineup.js"></script>
 <script src="friendly-game.js"></script>
 </body></html>

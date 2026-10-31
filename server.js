@@ -13,7 +13,7 @@ const io = new Server(srv, {
 });
 app.disable('x-powered-by');
 // Only the client files are public — server-side sources (server.js, friendly.js, package.json…) are never served.
-const PUBLIC = new Set(['index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js']);
+const PUBLIC = new Set(['index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js', 'lineup.js']);
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: Object.keys(rooms).length, uptime: Math.round(process.uptime()) }));
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/:file', (req, res, next) => PUBLIC.has(req.params.file) ? res.sendFile(path.join(__dirname, req.params.file), { maxAge: '5m' }) : next());

@@ -43,12 +43,16 @@
     },
     MJ: {
       n: 'MASHIN JADID', kit: ['#111111', '#d4a017'], r: [
-        P('Amir X Mod', 1, 55, 25, 62, 45, 35, 80),
-        P('Mohammad Gimer', 7, 82, 78, 74, 80, 60),
-        P('Mohammad Iron', 5, 76, 70, 72, 70, 86),
-        P('Parham Gameplay', 10, 85, 76, 84, 86, 58),
-        P('Kiasha', 9, 90, 84, 70, 88, 40),
-        P('Mashin Jadid #6', 6, 74, 68, 68, 68, 68)
+        P('Kairo', 1, 50, 25, 60, 45, 35, 86),
+        P('Kalbas', 7, 82, 78, 72, 80, 50),
+        P('Ryven', 10, 78, 82, 80, 84, 45),
+        P('Bati', 9, 76, 76, 70, 70, 60),
+        P('Ishin', 5, 74, 68, 74, 72, 70),
+        P('Amir X Mod', 11, 88, 80, 76, 86, 40),
+        P('Mohammad Gimer', 14, 82, 78, 74, 80, 60),
+        P('Mohammad Iron', 3, 76, 70, 72, 70, 86),
+        P('Parham Gameplay', 8, 85, 76, 84, 86, 58),
+        P('Kiasha', 21, 90, 84, 70, 88, 40)
       ]
     }
   };
@@ -56,7 +60,17 @@
   const ovr = p => p.gk ? p.gk : Math.round(p.pac * .2 + p.sho * .25 + p.pas * .2 + p.dri * .2 + p.def * .15);
   const sanitizeName = s => String(s == null ? '' : s).replace(/[^\p{L}\p{N} _.\-]/gu, '').trim().slice(0, 14);
 
-  const out = { SQUADS, TEAM_KEYS, ovr, sanitizeName };
+  /* Formations: 6 slots, slot 0 = goalkeeper; [depth, width] in -1..1 (own goal -> opponent goal, left -> right).
+   * Single source of truth: used by the server simulation, the match client and the line-up editor. */
+  const FORMS = {
+    '2-2-1': [[-.92, 0], [-.55, -.45], [-.55, .45], [-.1, -.5], [-.1, .5], [.45, 0]],
+    '2-1-2': [[-.92, 0], [-.55, -.45], [-.55, .45], [-.1, 0], [.45, -.4], [.45, .4]],
+    '3-1-1': [[-.92, 0], [-.55, -.6], [-.55, 0], [-.55, .6], [-.1, 0], [.45, 0]],
+    '1-3-1': [[-.92, 0], [-.55, 0], [-.1, -.6], [-.1, 0], [-.1, .6], [.45, 0]],
+    '1-2-2': [[-.92, 0], [-.55, 0], [-.1, -.5], [-.1, .5], [.45, -.4], [.45, .4]]
+  };
+  const DEF_FORM = '2-2-1';
+  const out = { SQUADS, TEAM_KEYS, ovr, sanitizeName, FORMS, DEF_FORM };
 
   /* ---------- browser-only helpers ---------- */
   if (typeof window !== 'undefined') {
@@ -86,8 +100,8 @@
     };
 
     /* Adaptive resolution: keeps ~50+ fps on phones by trading pixel ratio (never below `min`). */
-    out.Quality = function (renderer, max, min) {
-      let pr = max, n = 0, t0 = performance.now(), hold = 0;
+    out.Quality = function (renderer, max, min, onFloor) {
+      let pr = max, n = 0, t0 = performance.now(), hold = 0, floorHits = 0;
       renderer.setPixelRatio(pr);
       return {
         get pr() { return pr; },
@@ -97,6 +111,7 @@
           if (document.hidden || fps < 5) return;
           if (hold > 0) { hold--; return; }
           if (fps < 42 && pr > min) { pr = Math.max(min, +(pr - .2).toFixed(2)); renderer.setPixelRatio(pr); dispatchEvent(new Event('resize')); hold = 1; }
+          else if (fps < 36 && pr <= min && onFloor && ++floorHits >= 2) { onFloor(); onFloor = null; }
           else if (fps > 57 && pr < max) { pr = Math.min(max, +(pr + .1).toFixed(2)); renderer.setPixelRatio(pr); dispatchEvent(new Event('resize')); hold = 2; }
         }
       };

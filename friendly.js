@@ -1,15 +1,8 @@
 // PENALTY OUT — online 6v6 friendly match. Server-authoritative simulation on socket.io namespace /friendly.
-const { SQUADS: SQ, TEAM_KEYS, sanitizeName } = require('./shared.js');
+const { SQUADS: SQ, TEAM_KEYS, sanitizeName, FORMS, DEF_FORM } = require('./shared.js');
 const L = 25, W = 15, GW = 2.5, HALF = 150, DT = 1 / 30, BR = .18;
 const NS = 6, N = NS * 2, SUBS_MAX = 5, DRIBBLE_P = .4;            // players per team, total players, max substitutions, dribble success chance
-const FORMS = {
-  '2-2-1': [[-.92, 0], [-.55, -.45], [-.55, .45], [-.1, -.5], [-.1, .5], [.45, 0]],
-  '2-1-2': [[-.92, 0], [-.55, -.45], [-.55, .45], [-.1, 0], [.45, -.4], [.45, .4]],
-  '3-1-1': [[-.92, 0], [-.55, -.6], [-.55, 0], [-.55, .6], [-.1, 0], [.45, 0]],
-  '1-3-1': [[-.92, 0], [-.55, 0], [-.1, -.6], [-.1, 0], [-.1, .6], [.45, 0]],
-  '1-2-2': [[-.92, 0], [-.55, 0], [-.1, -.5], [-.1, .5], [.45, -.4], [.45, .4]]
-};
-const DEF_FORM = '2-2-1', DEF_ORDER = () => Array.from({ length: NS }, (_, k) => k);
+const DEF_ORDER = () => Array.from({ length: NS }, (_, k) => k);
 const TK = TEAM_KEYS;
 const formOf = (r, t) => { const q = r.lu[t]; return q.form === 'custom' && q.pos ? q.pos : FORMS[q.form]; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), hyp = Math.hypot, rnd = Math.random, rd = v => Math.round(v * 100) / 100;

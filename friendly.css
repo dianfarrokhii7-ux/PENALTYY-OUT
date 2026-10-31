@@ -48,3 +48,25 @@ h4{margin:6px 0 2px;text-align:left;font-size:15px;opacity:.8;letter-spacing:.08
 .strow{display:flex;justify-content:space-between;border-bottom:1px solid rgba(244,240,230,.2);padding:4px 6px}.strow span{opacity:.8}.strow b{color:var(--gold);min-width:3.5ch}
 #fb{width:290px}#fb button{height:54px}#fb button.big{height:76px}
 @media (max-height:420px){#fb button{height:46px;width:60px;font-size:12px}#fb button.big{height:62px;width:84px}}
+
+/* ---- advanced line-up editor ---- */
+.le{display:flex;flex-direction:column;gap:10px;text-align:left}
+.le-forms{display:flex;flex-wrap:wrap;gap:6px}.le-forms button{flex:1;font-size:13px;padding:7px 6px}
+.le button.sel{background:var(--gold);color:#111;border-color:var(--gold)}
+.le-pitch{position:relative;height:clamp(190px,34vh,300px);border:2px solid var(--chalk);border-radius:8px;overflow:hidden;touch-action:none;background:repeating-linear-gradient(90deg,#2c8a3c 0 8.33%,#34a044 8.33% 16.66%)}
+.le-pitch::before,.le-pitch::after{content:"";position:absolute;top:22%;bottom:22%;width:14%;border:2px solid rgba(255,255,255,.55)}
+.le-pitch::before{left:0;border-left:0}.le-pitch::after{right:0;border-right:0}
+.le-line{position:absolute;left:50%;top:0;bottom:0;width:2px;background:rgba(255,255,255,.55)}
+.tok{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;min-width:52px;padding:3px 5px;border-radius:8px;background:rgba(6,18,12,.82);border:2px solid var(--gold);cursor:grab;touch-action:none;transition:box-shadow .15s}
+.tok b{font-size:15px;color:var(--gold);line-height:1}.tok span{font-size:11px;font-weight:500;line-height:1.2;white-space:nowrap}
+.tok.gk{border-color:#c8f031;cursor:default}.tok.gk b{color:#c8f031}.tok.sel{background:var(--gold);box-shadow:0 0 0 3px rgba(255,210,63,.45)}.tok.sel b,.tok.sel span{color:#111}
+.le-sum{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.le-sum div{display:flex;flex-direction:column;gap:3px;text-align:center;font-size:12px}.le-sum b{font-size:20px;color:var(--gold)}
+.le i{display:block;height:5px;border-radius:3px;background:rgba(255,255,255,.15);overflow:hidden}.le i u{display:block;height:100%;background:linear-gradient(90deg,#2ecc71,#ffd23f)}
+.le-tools{display:flex;gap:6px;flex-wrap:wrap}.le-tools button{flex:1;font-size:13px;padding:8px 6px}
+.le-saves{display:flex;gap:6px}.le-saves button{flex:1;display:flex;flex-direction:column;font-size:15px;padding:6px}.le-saves small{font-size:10px;opacity:.7}.le-saves button.sv{border-color:var(--gold);animation:pulse 1s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 4px rgba(255,210,63,.35)}}
+.le h4{margin:4px 0 0}.le h4 small{opacity:.6;font-weight:500}
+.le-bench{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.le-bench button{display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;font-size:14px;padding:7px 8px}
+.le-bench b{color:var(--gold)}.le-bench button.sel b{color:#111}.le-bench em{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);gap:3px;font-style:normal}
+@media (prefers-reduced-motion:reduce){.le-saves button.sv{animation:none}}
