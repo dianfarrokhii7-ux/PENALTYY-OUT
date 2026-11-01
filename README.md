@@ -31,6 +31,20 @@ PC: WASD move · Shift sprint · F pass · E cross · Space shoot/header (hold) 
 Mobile: joystick + SWITCH / TACKLE / CROSS / PASS / **DRIBBLE** / SHOOT / SPRINT, SUBS button (top right).
 Penalties inside a match: shooter camera behind the ball (aim, hold SHOOT); defender controls the keeper from behind the goal. Free kicks: behind-the-ball camera for the taker only.
 Penalty shootout mode: aim with arrows, hold Space; keeper A/D + arrows to dive (touch pad on mobile).
+**Gamepad** (PS4/PS5/Xbox, Bluetooth or USB; press any button once so the browser detects it): see the table below.
+
+| Gamepad | Friendly match | Shootout – shooter | Shootout – keeper |
+|---|---|---|---|
+| Left stick / D-pad | move | aim | move |
+| Cross / A | pass | charge + shoot | jump (high, centre) |
+| Circle / B | shoot (hold) | charge + shoot | dive right |
+| Square / X | cross | charge + shoot | dive left |
+| Triangle / Y | dribble | charge + shoot | high dive (hold with a dive) |
+| L1 / LB | switch player | – | dive left |
+| R1 / RB, R2 / RT | sprint | R2 charge + shoot | R1 dive right |
+| L2 / LT | tackle | – | – |
+| Start | substitutions | – | – |
+| Right stick | – | – | dive left / right (up = high) |
 
 ## v7 changes
 - **Mashin Jadid squad**: Kairo (GK), Kalbas, Ryven, Bati, Ishin are the starting players; Amir X Mod (6th man), Mohammad Gimer, Mohammad Iron, Parham Gameplay and Kiasha stay in the squad.

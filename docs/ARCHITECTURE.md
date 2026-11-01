@@ -5,6 +5,7 @@ server.js        Express + Socket.IO entry: static client files (whitelist), /he
 friendly.js      6v6 friendly: authoritative simulation (30 Hz) + room/lobby sockets on namespace /friendly
 shared.js        Squads, ratings, formations, name rules (Node + browser). Browser-only: classic ball, Quality, name prompt
 lineup.js        Browser line-up editor (drag & drop pitch, presets, auto XI, save slots)
+gamepad.js       Gamepad (PS4/Xbox…) -> synthetic keyboard events for both clients
 game.js          Penalty-shootout client          friendly-game.js  Friendly-match client (scene, input, HUD, subs)
 test/            squads, lineup editor, simulation, dribble rate, two-client socket integration
 ```
