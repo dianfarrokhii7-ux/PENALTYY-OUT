@@ -141,7 +141,7 @@ function padRole() {
 function hud() {
   if (!st) return;
   [0, 1].forEach(i => {
-    $('n' + i).textContent = TEAMS[st.team[i]].n + ' · ' + pname(st, i) + (i === me ? ' (YOU)' : ''); $('s' + i).textContent = st.score[i];
+    { const el = $('n' + i); el.textContent = TEAMS[st.team[i]].n; const sm = document.createElement('small'); sm.textContent = pname(st, i) + (i === me ? ' (you)' : ''); el.appendChild(sm); } $('s' + i).textContent = st.score[i];
     const L = st.log[i], n = Math.max(5, L.length); $('d' + i).innerHTML = Array.from({ length: n }, (_, j) => `<i class="${L[j] === 1 ? 'g' : L[j] === 0 ? 'm' : ''}"></i>`).join('');
   });
   $('conn').textContent = st.conn[1 - me] ? '' : 'Opponent disconnected — waiting for reconnection…';
