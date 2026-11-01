@@ -69,3 +69,9 @@ h4{margin:6px 0 2px;text-align:left;font-size:15px;opacity:.8;letter-spacing:.08
 .le-bench button{display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:left;font-size:14px;padding:7px 8px}
 .le-bench b{color:var(--gold)}.le-bench button.sel b{color:#111}.le-bench em{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,1fr);gap:3px;font-style:normal}
 @media (prefers-reduced-motion:reduce){.le-saves button.sv{animation:none}}
+
+/* ---- v8: match settings ---- */
+.setrow{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:18px;font-weight:700}
+.seg{display:flex;gap:6px}.seg button{min-width:78px;font-size:16px;padding:8px 10px;opacity:.7}
+.seg button.sel{background:var(--gold);color:#111;border-color:var(--gold);opacity:1}
+.seg button:disabled.sel{opacity:1}.seg button:disabled{cursor:default}

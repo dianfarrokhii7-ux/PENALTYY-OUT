@@ -18,5 +18,10 @@ test/            squads, lineup editor, simulation, dribble rate, two-client soc
 * Line-up: `{ form, order }` or `{ form: 'custom', pos, order }`; `order[slot]` = squad index, slot 0 is always squad index 0 (goalkeeper).
   The server validates every line-up (permutation, bounds, clamped positions) before use.
 
+## Settings, extra time, shootout
+`room.set = { night, extra, pens }` is chosen by the host in phase `settings` (after line-ups). `tick()` runs two extra halves (`ET_HALF`) when level and `extra`; if still level and `pens`
+(and both humans online) the phase becomes `shootout`: `friendly.js` asks `server.js` (`hooks.shootout`) for a pre-seated penalty room and sends each player `{code, token}`;
+the client stores it as the normal `po` session and reloads `/` where `game.js` rejoins it. Env overrides for tests: `PO_HALF`, `PO_ET`.
+
 ## Tuning
 Constants are at the top of `friendly.js` (pitch size, half length, dribble chance, max substitutions) and in `shared.js` (squads/formations).

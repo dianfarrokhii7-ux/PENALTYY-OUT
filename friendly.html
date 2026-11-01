@@ -44,7 +44,15 @@
   <div id="lineup" class="screen hide wide">
     <h2>Line-up</h2><p class="sub">Drag players on the pitch to build your own system. Tap two players to swap, or a player and a bench player to bring him on.</p>
     <div id="editor"></div>
-    <button class="big" id="bStart">Start match</button><p class="sub" id="lumsg"></p>
+    <button class="big" id="bStart">Next: match settings</button><p class="sub" id="lumsg"></p>
+  </div>
+  <div id="settings" class="screen hide">
+    <h2>Match settings</h2><p class="sub" id="setMsg"></p>
+    <div class="setrow"><span>Time of day</span><div class="seg" data-k="night"><button data-v="0">Day</button><button data-v="1">Night</button></div></div>
+    <div class="setrow"><span>Extra time</span><div class="seg" data-k="extra"><button data-v="1">On</button><button data-v="0">Off</button></div></div>
+    <div class="setrow"><span>Penalty shootout</span><div class="seg" data-k="pens"><button data-v="1">On</button><button data-v="0">Off</button></div></div>
+    <p class="sub">If the score is level after full time: extra time (2 &times; 1:00) if on, then a penalty shootout &mdash; the same mode as the main menu &mdash; if on. Otherwise the match ends in a draw.</p>
+    <button class="big" id="bGo">Start match</button>
   </div>
   <div id="end" class="screen hide"><h2 id="endT"></h2><div id="endStats"></div><button class="big" onclick="location.href='/friendly.html'">Back to menu</button></div>
 </div>

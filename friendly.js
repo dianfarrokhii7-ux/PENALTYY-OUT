@@ -1,6 +1,6 @@
 // PENALTY OUT — online 6v6 friendly match. Server-authoritative simulation on socket.io namespace /friendly.
 const { SQUADS: SQ, TEAM_KEYS, sanitizeName, FORMS, DEF_FORM } = require('./shared.js');
-const L = 25, W = 15, GW = 2.5, HALF = 150, DT = 1 / 30, BR = .18;
+const L = 25, W = 15, GW = 2.5, HALF = +process.env.PO_HALF || 150, ET_HALF = +process.env.PO_ET || 60, DT = 1 / 30, BR = .18;   // half lengths in seconds (env overrides are for tests)
 const NS = 6, N = NS * 2, SUBS_MAX = 5, DRIBBLE_P = .4;            // players per team, total players, max substitutions, dribble success chance
 const DEF_ORDER = () => Array.from({ length: NS }, (_, k) => k);
 const TK = TEAM_KEYS;
@@ -11,7 +11,7 @@ const dirOf = (r, t) => (t ? -1 : 1) * (r.flip ? -1 : 1);
 const mkSt = () => ({ shots: 0, passes: 0, tackles: 0, fouls: 0, dr: 0, drOk: 0, poss: 0 });
 function mk(code) {
   return { code, sk: [null, null], tok: [null, null], on: [false, false], team: ['BAR', 'RMA'], rdy: [false, false],
-    lu: [{ form: DEF_FORM, order: DEF_ORDER() }, { form: DEF_FORM, order: DEF_ORDER() }], ph: 'lobby', flip: false, names: ['', ''], swc: [0, 0], subs: [0, 0], st: [mkSt(), mkSt()],
+    lu: [{ form: DEF_FORM, order: DEF_ORDER() }, { form: DEF_FORM, order: DEF_ORDER() }], ph: 'lobby', flip: false, names: ['', ''], set: { night: true, extra: false, pens: false }, swc: [0, 0], subs: [0, 0], st: [mkSt(), mkSt()],
     score: [0, 0], clock: HALF, half: 1, ctrl: [NS - 1, 2 * NS - 1], inp: [{ mx: 0, mz: 0, sp: 0 }, { mx: 0, mz: 0, sp: 0 }], P: [],
     ball: { x: 0, y: BR, z: 0, vx: 0, vy: 0, vz: 0, o: -1, rt: 0 }, last: 0, rs: null, pt: 0, ev: [], chase: [-1, -1] };
 }
@@ -274,7 +274,11 @@ function tick(r) {
   else {
     r.clock -= DT;
     if (r.clock <= 0 && r.ph === 'play') {
-      if (r.half === 1) { r.half = 2; r.clock = HALF; r.flip = true; r.ph = 'goal'; r.pt = 3.5; r.ev.push({ k: 'half' }); r.after = () => kickoff(r, 1); }
+      const tied = r.score[0] === r.score[1], nextHalf = (h, clock, flip, kt) => { r.half = h; r.clock = clock; r.flip = flip; r.ph = 'goal'; r.pt = 3.5; r.ev.push({ k: 'half', h }); r.after = () => kickoff(r, kt); };
+      if (r.half === 1) nextHalf(2, HALF, true, 1);
+      else if (r.half === 2 && tied && r.set.extra) nextHalf(3, ET_HALF, false, 0);   // extra time: 2 short halves, sides swap again
+      else if (r.half === 3) nextHalf(4, ET_HALF, true, 1);
+      else if (tied && r.set.pens && r.on[0] && r.on[1]) { r.ph = 'shootout'; r.ev.push({ k: 'shootout' }); return; }   // handed to the penalty-shootout mode (see attach)
       else { r.ph = 'end'; r.ev.push({ k: 'end', score: [...r.score], st: matchStats(r) }); return; }
     }
   }
@@ -357,10 +361,10 @@ function snap(r) {
     b: [rd(B.x), rd(B.y), rd(B.z), B.o], p: r.P.map(p => [rd(p.x), rd(p.z), rd(Math.atan2(p.fz, p.fx)), p.st, p.red ? 1 : 0, rd(hyp(p.vx, p.vz)), p.y, rd(p.vz)]), k: r.ctrl, sb: r.subs };
 }
 
-function attach(io) {
+function attach(io, hooks = {}) {
   const ns = io.of('/friendly'), rooms = {}; let queue = null;
   const tok = () => Math.random().toString(36).slice(2, 12), R = s => s.data && rooms[s.data.c];
-  const pub = r => ({ code: r.code, on: r.on, team: r.team, rdy: r.rdy, ph: r.ph, lu: r.lu, names: r.names });
+  const pub = r => ({ code: r.code, on: r.on, team: r.team, rdy: r.rdy, ph: r.ph, lu: r.lu, names: r.names, set: r.set });
   const ok = (s, lim) => { const n = Date.now(), w = s.data && (s.data.rl || (s.data.rl = { t: n, c: 0 })); if (!w) return false; if (n - w.t > 1000) { w.t = n; w.c = 0; } return ++w.c <= lim; };
   const seat = (r, s, i, name) => { r.names[i] = sanitizeName(name) || 'Player'; r.sk[i] = s.id; r.tok[i] = tok(); r.on[i] = true; s.join(r.code); s.data = { c: r.code, i }; s.emit('joined', { code: r.code, i, token: r.tok[i] }); ns.to(r.code).emit('room', pub(r)); };
   const mkRoom = () => { let c; do c = Math.random().toString(36).slice(2, 6).toUpperCase(); while (rooms[c]); return rooms[c] = mk(c); };
@@ -372,7 +376,7 @@ function attach(io) {
     s.on('rejoin', ({ code, token }) => {
       const r = rooms[code], i = r ? r.tok.indexOf(token) : -1; if (i < 0) return s.emit('err', 'Session expired');
       r.sk[i] = s.id; r.on[i] = true; s.join(code); s.data = { c: code, i }; s.emit('joined', { code, i, token }); ns.to(code).emit('room', pub(r));
-      if (!['lobby', 'lineup'].includes(r.ph)) s.emit('start', { team: r.team, lu: r.lu });
+      if (!['lobby', 'lineup', 'settings'].includes(r.ph)) s.emit('start', { team: r.team, lu: r.lu, set: r.set });
     });
     s.on('team', t => { const r = R(s); if (!r || r.ph !== 'lobby' || r.rdy[s.data.i]) return; const i = s.data.i; if (r.rdy[1 - i] && r.team[1 - i] === t) return; r.team[i] = TK.includes(t) ? t : 'BAR'; ns.to(r.code).emit('room', pub(r)); });
     s.on('lineup', d => {
@@ -381,11 +385,17 @@ function attach(io) {
       if (d.form === 'custom' && Array.isArray(d.pos) && d.pos.length === NS) r.lu[s.data.i] = { form: 'custom', pos: d.pos.map((q, k) => k === 0 ? [-.92, 0] : [clamp(+(q && q[0]) || 0, -.8, .7), clamp(+(q && q[1]) || 0, -.8, .8)]), order: o.map(Number) };
       else if (FORMS[d.form]) r.lu[s.data.i] = { form: d.form, order: o.map(Number) };
     });
+    s.on('settings', d => {   // only the host (seat 0), only on the settings screen
+      const r = R(s); if (!r || r.ph !== 'settings' || s.data.i !== 0 || !d) return;
+      r.set = { night: !!d.night, extra: !!d.extra, pens: !!d.pens }; ns.to(r.code).emit('room', pub(r));
+    });
     s.on('ready', () => {
-      const r = R(s); if (!r || !r.on[0] || !r.on[1]) return; r.rdy[s.data.i] = true;
+      const r = R(s); if (!r || !r.on[0] || !r.on[1]) return;
+      if (r.ph === 'settings') { if (s.data.i === 0) { start(r); ns.to(r.code).emit('start', { team: r.team, lu: r.lu, set: r.set }); ns.to(r.code).emit('room', pub(r)); } return; }
+      r.rdy[s.data.i] = true;
       if (r.rdy[0] && r.rdy[1]) {
         if (r.ph === 'lobby') { if (r.team[0] === r.team[1]) r.team[1] = TK.find(k => k !== r.team[0]); r.ph = 'lineup'; r.rdy = [false, false]; }
-        else if (r.ph === 'lineup') { start(r); ns.to(r.code).emit('start', { team: r.team, lu: r.lu }); }
+        else if (r.ph === 'lineup') { r.ph = 'settings'; r.rdy = [false, false]; }   // line-ups done -> host picks the match settings
       }
       ns.to(r.code).emit('room', pub(r));
     });
@@ -403,9 +413,16 @@ function attach(io) {
       setTimeout(() => { if (!r.on[0] && !r.on[1]) delete rooms[r.code]; }, 60000);
     });
   });
+  /* Level after full/extra time: build a normal penalty-shootout room (the exact same mode as the main menu) and send both players into it. */
+  function launchShootout(r) {
+    const info = hooks.shootout && hooks.shootout(r.team, r.names);
+    if (!info) { r.ph = 'end'; r.ev.push({ k: 'end', score: [...r.score], st: matchStats(r) }); return; }
+    setTimeout(() => [0, 1].forEach(i => r.sk[i] && ns.to(r.sk[i]).emit('shootout', { code: info.code, token: info.tokens[i] })), 2500);
+  }
   setInterval(() => {
     for (const c in rooms) {
       const r = rooms[c]; if (!r.P.length) continue; tick(r);
+      if (r.ph === 'shootout' && !r.soDone) { r.soDone = true; launchShootout(r); }
       ns.to(c).volatile.emit('snap', snap(r)); if (r.ev.length) { ns.to(c).emit('ev', r.ev); r.ev = []; }
     }
   }, 1000 * DT);

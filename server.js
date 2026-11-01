@@ -69,6 +69,13 @@ function begin(r) {
   clearTimeout(r.advanceTimer);
   r.advanceTimer = setTimeout(() => nextTurn(r), 1800);
 }
+/* Pre-seated shootout room for a drawn friendly match: both players rejoin it with the returned tokens (same flow as a page refresh). */
+function shootoutRoom(teams, names) {
+  const r = mkRoom(); r.team = [...teams]; r.ready = [true, true]; r.phase = 'idle'; r.waiting = true; r.phaseAt = Date.now();
+  const tokens = [0, 1].map(i => { const t = tok(); r.p[i] = { id: null, token: t, on: false, disconnectTimer: null, name: (names && names[i]) || 'Player' }; return t; });
+  setTimeout(() => { if (rooms[r.code] && r.p.some(p => !p.on) && r.phase === 'idle') { clearRoomTimers(r); delete rooms[r.code]; } }, 90000);
+  return { code: r.code, tokens };
+}
 function nextTurn(r) {
   clearTimeout(r.to); clearTimeout(r.resolveTimer); clearTimeout(r.advanceTimer);
   if (r.p.some(p => !p || !p.on)) { r.waiting = true; return; }
@@ -207,5 +214,5 @@ io.on('connection', socket => {
 });
 
 const port = process.env.PORT || 3000;
-require('./friendly').attach(io);
+require('./friendly').attach(io, { shootout: shootoutRoom });
 srv.listen(port, () => console.log('PENALTY OUT on port ' + port));

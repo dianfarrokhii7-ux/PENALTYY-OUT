@@ -28,9 +28,16 @@ const once = (s, ev, ms = 4000) => new Promise((res, rej) => { const t = setTime
     a.emit('ready'); b.emit('ready'); await sleep(200);
     const lu = { form: '3-1-1', order: [0, 1, 2, 3, 4, 5] };
     a.emit('lineup', lu); b.emit('lineup', { form: '2-2-1', order: [0, 1, 2, 3, 9, 5] });   // 9 = Valverde from the bench
+    // both confirm line-ups -> settings screen (host only can change / start)
+    const setRoom = once(a, 'room'); a.emit('ready'); b.emit('ready');
+    let rm = await setRoom; for (let i = 0; i < 3 && rm.ph !== 'settings'; i++) rm = await once(a, 'room');
+    assert.strictEqual(rm.ph, 'settings'); assert.deepStrictEqual(rm.set, { night: true, extra: false, pens: false });
+    b.emit('settings', { night: false, extra: true, pens: true }); await sleep(150);      // guest cannot change settings
+    a.emit('settings', { night: false, extra: true, pens: false, evil: 1 });
+    rm = await once(a, 'room'); assert.deepStrictEqual(rm.set, { night: false, extra: true, pens: false }, 'host settings applied, guest ignored');
     const started = Promise.all([once(a, 'start'), once(b, 'start')]);
-    a.emit('ready'); b.emit('ready');
-    const [sa, sb] = await started;
+    b.emit('ready'); await sleep(150); a.emit('ready');                                    // guest ready is ignored; host starts
+    const [sa, sb] = await started; assert.strictEqual(sa.set.night, false, 'settings travel with start');
     assert.deepStrictEqual(sa.team, ['MJ', 'RMA']); assert.strictEqual(sb.lu[1].order[4], 9, 'bench player is in the XI');
     const snap = await once(a, 'snap'); assert.strictEqual(snap.p.length, 12, '6v6 = 12 players');
     // invalid line-up (duplicate player) is rejected

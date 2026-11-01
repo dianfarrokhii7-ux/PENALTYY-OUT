@@ -42,18 +42,16 @@ const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0a1830); s
 const cam = new THREE.PerspectiveCamera(48, 1, .1, 250);
 const resize = () => { R.setSize(innerWidth, innerHeight, false); cam.aspect = innerWidth / innerHeight; cam.fov = cam.aspect < 1 ? 70 : 48; cam.updateProjectionMatrix(); };
 addEventListener('resize', resize); resize();
-scene.add(new THREE.HemisphereLight(0xdde8ff, 0x2a4a2a, .95));
+const hemi = new THREE.HemisphereLight(0xdde8ff, 0x2a4a2a, .95); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, .75); sun.position.set(10, 40, 15); scene.add(sun); sun.castShadow = SH;
 if (SH) { sun.shadow.mapSize.set(MOB ? 1024 : 2048, MOB ? 1024 : 2048); const sc = sun.shadow.camera; sc.left = -34; sc.right = 34; sc.top = 24; sc.bottom = -24; sc.near = 5; sc.far = 90; sun.shadow.bias = -.0006; scene.add(sun.target); }
 const MCACHE = new Map();   // plain materials are shared between meshes (fewer GPU state changes)
 const mat = (c, o) => { if (o) return new THREE.MeshLambertMaterial({ color: c, ...o }); let m = MCACHE.get(c); if (!m) MCACHE.set(c, m = new THREE.MeshLambertMaterial({ color: c })); return m; };
 
 const glowTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.3, 'rgba(255,255,255,.4)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
-(function sky() {
-  const c = document.createElement('canvas'); c.width = 4; c.height = 256; const x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0, '#04091a'); g.addColorStop(.55, '#0e2347'); g.addColorStop(1, '#26456e'); x.fillStyle = g; x.fillRect(0, 0, 4, 256);
-  scene.add(new THREE.Mesh(new THREE.SphereGeometry(200, 16, 12), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.BackSide, fog: false })));
-})();
+const skyC = document.createElement('canvas'); skyC.width = 4; skyC.height = 256; const skyTex = new THREE.CanvasTexture(skyC);
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(200, 16, 12), new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false })));
+const lamps = [];   // floodlight heads + glow sprites (only lit at night)
 (function pitch() {
   const k = 30, c = document.createElement('canvas'); c.width = 56 * k; c.height = 36 * k; const x = c.getContext('2d'), X = m => (m + 28) * k, Z = m => (m + 18) * k;
   for (let i = 0; i < 14; i++) { const gr = x.createLinearGradient(0, 0, 0, c.height); const a = i % 2 ? ['#2c8a3c', '#34a044', '#2c8a3c'] : ['#339a43', '#3fb352', '#339a43']; gr.addColorStop(0, a[0]); gr.addColorStop(.5, a[1]); gr.addColorStop(1, a[2]); x.fillStyle = gr; x.fillRect(i * c.width / 14, 0, c.width / 14 + 1, c.height); }
@@ -127,7 +125,7 @@ for (let q = 0; q < 4; q++) {
 }
 [[-40, -28], [40, -28], [-40, 28], [40, 28]].forEach(([x, z]) => {
   const t = new THREE.Mesh(new THREE.CylinderGeometry(.3, .4, 22, 8), mat(0x555a66)); t.position.set(x * 1.2, 11, z * 1.2); scene.add(t);
-  const h = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 1), new THREE.MeshBasicMaterial({ color: 0xfffbe0 })); h.position.set(x * 1.2, 23, z * 1.2); h.lookAt(0, 8, 0); scene.add(h); const gl = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xfff2c8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); gl.position.copy(h.position); gl.scale.set(16, 16, 1); scene.add(gl);
+  const h = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 1), new THREE.MeshBasicMaterial({ color: 0xfffbe0 })); h.position.set(x * 1.2, 23, z * 1.2); h.lookAt(0, 8, 0); scene.add(h); const gl = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xfff2c8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); gl.position.copy(h.position); gl.scale.set(16, 16, 1); scene.add(gl); lamps.push(h, gl);
 });
 
 /* ball */
@@ -253,10 +251,22 @@ const RS = { kickoff: 'KICK-OFF', throwin: 'THROW-IN', goalkick: 'GOAL KICK', co
 sock.on('connect', () => { const s = JSON.parse(sessionStorage.getItem('pof') || 'null'); if (s) sock.emit('rejoin', s); });
 sock.on('err', m => { $('err').textContent = m; if ($('menu').classList.contains('off')) banner(m, '#ffd23f'); });
 sock.on('joined', d => { me = d.i; sessionStorage.setItem('pof', JSON.stringify({ code: d.code, token: d.token })); show('lobby'); $('rc').textContent = d.code; });
-function show(id) { ['home', 'lobby', 'lineup', 'end'].forEach(s => $(s).classList.toggle('hide', s !== id)); }
+/* Day / night: sky, fog, lights, floodlights and pitch brightness. Night is the default look. */
+function applyTime(night) {
+  const x = skyC.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 256), st = night ? ['#04091a', '#0e2347', '#26456e'] : ['#3d8fe0', '#8ec5f0', '#d8eefc'];
+  g.addColorStop(0, st[0]); g.addColorStop(.55, st[1]); g.addColorStop(1, st[2]); x.fillStyle = g; x.fillRect(0, 0, 4, 256); skyTex.needsUpdate = true;
+  scene.background.setHex(night ? 0x0a1830 : 0x8ec5f0); scene.fog.color.setHex(night ? 0x0a1830 : 0xb4d8f4);
+  hemi.color.setHex(night ? 0xdde8ff : 0xffffff); hemi.groundColor.setHex(night ? 0x2a4a2a : 0x4a7a3a); hemi.intensity = night ? .95 : 1.1;
+  sun.color.setHex(night ? 0xffffff : 0xfff2d8); sun.intensity = night ? .75 : 1.05;
+  lamps.forEach(o => { if (o.isSprite) o.visible = night; else o.material.color.setHex(night ? 0xfffbe0 : 0x8a9099); });
+  const pm = scene.children.find(o => o.geometry && o.geometry.type === 'PlaneGeometry' && o.geometry.parameters.width === 56); if (pm) pm.material.color.setHex(night ? 0x9c9c9c : 0xbcbcbc);
+}
+applyTime(true);
+function show(id) { ['home', 'lobby', 'lineup', 'settings', 'end'].forEach(s => $(s).classList.toggle('hide', s !== id)); }
 sock.on('room', d => {
   room = d; if (me < 0) return;
   [0, 1].forEach(i => { const e = $('p' + i), nm = (d.names && d.names[i]) || (i === me ? 'You' : 'Opponent'); e.textContent = nm + (i === me ? ' (you)' : '') + (d.on[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.on[i]); });
+  if (d.ph === 'settings') { show('settings'); renderSettings(d); return; }
   if (d.ph === 'lineup') { if (!luInit) { luInit = true; show('lineup'); LE.setTeam(room.team[me]); } $('lumsg').textContent = d.rdy[me] ? 'Waiting for opponent…' : ''; $('bStart').disabled = !!d.rdy[me]; return; }
   if (d.ph !== 'lobby') return;
   const both = d.on[0] && d.on[1], mine = d.rdy[me], opp = d.rdy[1 - me] ? d.team[1 - me] : null;
@@ -269,17 +279,26 @@ sock.on('room', d => {
 });
 const statLine = q => q.gk ? `GK ${q.gk}` : `PAC ${q.pac} · SHO ${q.sho} · PAS ${q.pas} · DRI ${q.dri} · DEF ${q.def}`;
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function renderSettings(d) {
+  const host = me === 0, set = d.set || { night: true, extra: false, pens: false }, hn = (d.names && d.names[0]) || 'The host';
+  document.querySelectorAll('#settings .seg').forEach(g => g.querySelectorAll('button').forEach(b => { b.classList.toggle('sel', (b.dataset.v === '1') === !!set[g.dataset.k]); b.disabled = !host; }));
+  $('bGo').classList.toggle('hide', !host); $('setMsg').textContent = host ? 'You are the host: choose the settings, then start the match.' : hn + ' is choosing the match settings…';
+  applyTime(!!set.night);
+}
+document.querySelectorAll('#settings .seg button').forEach(b => b.onclick = () => { if (me !== 0 || !room || !room.set) return; sock.emit('settings', { ...room.set, [b.parentNode.dataset.k]: b.dataset.v === '1' }); });
+$('bGo').onclick = () => { sock.emit('ready'); $('bGo').disabled = true; };
 $('bStart').onclick = () => { sock.emit('lineup', LE.value()); sock.emit('ready'); $('bStart').disabled = true; };
 sock.on('start', d => {
-  room = { ...(room || {}), team: d.team }; buildPlayers(d.team, d.lu); G = d;
+  room = { ...(room || {}), team: d.team }; buildPlayers(d.team, d.lu); G = d; applyTime(!d.set || !!d.set.night);
   $('menu').classList.add('off'); $('hud').classList.remove('hide'); if (matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window) { $('fpad').classList.remove('hide'); $('help').classList.add('hide'); }
   [0, 1].forEach(i => { const el = $('n' + i), nm = (room && room.names && room.names[i]) || ''; el.textContent = TEAMS[d.team[i]].n; if (nm) { const sm = document.createElement('small'); sm.textContent = nm + (i === me ? ' (you)' : ''); el.appendChild(sm); } });
   $('bSubs').classList.remove('hide'); crowdStart();
 });
+sock.on('shootout', d => { sessionStorage.removeItem('pof'); sessionStorage.setItem('po', JSON.stringify({ code: d.code, token: d.token })); location.href = '/'; });   // continue in the penalty-shootout mode
 sock.on('snap', s => {
   S = s; flip = s.fl; Bl.o = s.b[3]; bt.x = s.b[0]; bt.y = s.b[1]; bt.z = s.b[2];
   s.p.forEach((p, i) => { const e = ents[i]; if (!e) return; e.tx = p[0]; e.tz = p[1]; e.ta = p[2]; e.st = p[3]; e.red = p[4]; e.sp = p[5]; e.vz = p[7] || 0; });
-  txt('s0', s.s[0]); txt('s1', s.s[1]); txt('clk', `${s.h === 1 ? '1st' : '2nd'}  ${Math.floor(s.c / 60)}:${String(s.c % 60).padStart(2, '0')}`);
+  txt('s0', s.s[0]); txt('s1', s.s[1]); txt('clk', `${['1st', '2nd', 'ET 1', 'ET 2'][s.h - 1] || '2nd'}  ${Math.floor(s.c / 60)}:${String(s.c % 60).padStart(2, '0')}`);
   const ce = ents[s.k[me]]; if (ce && ce !== whoE) { whoE = ce; $('who').innerHTML = `${esc(ce.name)} #${ce.num} <b>${POF.ovr(ce.q)}</b><small>${statLine(ce.q)}</small>`; } else if (!ce) $('who').textContent = '';
   subRefresh(s);
   txt('msg', s.ph === 'dead' && s.rs ? (s.rs.k === 'penalty' ? (s.rs.t === me ? (s.pn && s.pn[0] === 0 ? 'PENALTY — aim with stick / WASD, hold SHOOT, release to kick' : '') : 'PENALTY — you are the goalkeeper: move left/right, press SHOOT to dive toward the stick') : `${RS[s.rs.k]} — ${s.rs.t === me ? 'YOU (pass / shoot)' : 'opponent'}`) : '');
@@ -301,7 +320,8 @@ sock.on('ev', list => list.forEach(e => {
   else if (e.k === 'head' || e.k === 'volley') beep(260, .1, 'triangle', .25);
   else if (e.k === 'cross') beep(420, .25, 'triangle', .15);
   else if (e.k === 'post') { beep(1100, .2, 'square', .12); crowd(.2, 900, 1.5); }
-  else if (e.k === 'half') { banner('HALF TIME', '#ffd23f'); beep(2000, .8, 'square', .06); }
+  else if (e.k === 'shootout') banner('PENALTY SHOOTOUT', '#ffd23f');
+  else if (e.k === 'half') { banner(e.h === 3 ? 'EXTRA TIME' : e.h === 4 ? 'EXTRA TIME — 2ND HALF' : 'HALF TIME', '#ffd23f'); beep(2000, .8, 'square', .06); }
   else if (e.k === 'end') { $('hud').classList.add('hide'); $('fpad').classList.add('hide'); $('menu').classList.remove('off'); show('end'); sessionStorage.removeItem('pof'); const a = e.score[me], b = e.score[1 - me]; $('endT').textContent = `${a > b ? 'YOU WIN' : a < b ? 'YOU LOSE' : 'DRAW'}  ${a} – ${b}`; $('subs').classList.add('hide'); $('bSubs').classList.add('hide'); showStats(e.st); }
 }));
 

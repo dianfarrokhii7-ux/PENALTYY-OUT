@@ -46,6 +46,12 @@ Penalty shootout mode: aim with arrows, hold Space; keeper A/D + arrows to dive 
 | Start | substitutions | – | – |
 | Right stick | – | – | dive left / right (up = high) |
 
+## v8 changes — match settings (6v6)
+After both players are connected **and** have confirmed their line-ups, the host sees a *Match settings* screen (the guest sees the choices live, read-only):
+- **Time of day**: Day / Night (sky, lights, floodlights, pitch brightness).
+- **Extra time**: on/off — if level after full time, 2 short halves (1:00 each, sides swap).
+- **Penalty shootout**: on/off — if still level, both players are moved into the normal **penalty-shootout mode** (same room logic, camera, aiming, keeper dive, 5 kicks each + sudden death, same teams and names). If one player is offline the match simply ends as a draw.
+
 ## v7 changes
 - **Mashin Jadid squad**: Kairo (GK), Kalbas, Ryven, Bati, Ishin are the starting players; Amir X Mod (6th man), Mohammad Gimer, Mohammad Iron, Parham Gameplay and Kiasha stay in the squad.
 - **Advanced line-up screen** (`lineup.js`): drag players on a pitch to build any system (turns into CUSTOM, snapped and clamped), tap-to-swap / bring on bench players, **AUTO XI** (best players for each role), **MIRROR**, **RESET**, 3 **save slots per team** (stored on the device, validated on load), live team ratings (OVR / ATT / DEF / PACE / PASS) and a bench sorted by overall with stat bars.
