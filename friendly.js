@@ -372,7 +372,10 @@ function attach(io, hooks = {}) {
   ns.on('connection', s => {
     s.on('create', d => seat(mkRoom(), s, 0, d && d.name));
     s.on('join', d => { const c = typeof d === 'string' ? d : d && d.code, r = rooms[String(c || '').toUpperCase().trim()]; r ? join(s, r, d && d.name) : s.emit('err', 'Room not found'); });
-    s.on('quick', d => { const nm = d && d.name; if (queue && rooms[queue] && !rooms[queue].sk[1]) { join(s, rooms[queue], nm); queue = null; } else { const r = mkRoom(); queue = r.code; seat(r, s, 0, nm); } });
+    s.on('quick', d => { const nm = d && d.name, mode = ['ranked','league'].includes(d && d.mode) ? d.mode : 'friendly';
+      if (queue && rooms[queue.code] && !rooms[queue.code].sk[1] && queue.mode === mode) { join(s, rooms[queue.code], nm); queue = null; }
+      else { const r = mkRoom(); r.mode = mode; queue = { code:r.code, mode }; seat(r, s, 0, nm); }
+    });
     s.on('rejoin', ({ code, token }) => {
       const r = rooms[code], i = r ? r.tok.indexOf(token) : -1; if (i < 0) return s.emit('err', 'Session expired');
       r.sk[i] = s.id; r.on[i] = true; s.join(code); s.data = { c: code, i }; s.emit('joined', { code, i, token }); ns.to(code).emit('room', pub(r));
@@ -421,7 +424,7 @@ function attach(io, hooks = {}) {
   }
   setInterval(() => {
     for (const c in rooms) {
-      const r = rooms[c]; if (!r.P.length) continue; tick(r);
+      const r = rooms[c]; if (!r.P.length) continue; tick(r); if (r.ph === 'end' && r.mode && !r.compSaved && hooks.onFinish) { hooks.onFinish(r); r.compSaved = true; }
       if (r.ph === 'shootout' && !r.soDone) { r.soDone = true; launchShootout(r); }
       ns.to(c).volatile.emit('snap', snap(r)); if (r.ev.length) { ns.to(c).emit('ev', r.ev); r.ev = []; }
     }

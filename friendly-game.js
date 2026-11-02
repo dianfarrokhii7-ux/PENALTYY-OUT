@@ -328,7 +328,7 @@ sock.on('ev', list => list.forEach(e => {
 /* ---------- menu ---------- */
 document.querySelectorAll('.team').forEach(b => b.onclick = () => { myTeam = b.dataset.t; sock.emit('team', myTeam); document.querySelectorAll('.team').forEach(x => x.classList.toggle('sel', x === b)); });
 const fresh = () => { sessionStorage.removeItem('pof'); luInit = false; };
-const nm = () => ({ name: POF.name() });
+const mode = new URLSearchParams(location.search).get('mode'); const nm = () => ({ name: POF.name(), mode: ['ranked','league'].includes(mode) ? mode : 'friendly' });
 $('bQuick').onclick = () => { fresh(); sock.emit('quick', nm()); }; $('bCreate').onclick = () => { fresh(); sock.emit('create', nm()); }; $('bJoin').onclick = () => { fresh(); sock.emit('join', { code: $('code').value, ...nm() }); };
 const nameBtn = () => { $('bName').textContent = 'Player: ' + POF.name() + '  ✎'; };
 $('bName').onclick = () => POF.askName(true, nameBtn); POF.askName(false, nameBtn);
@@ -394,4 +394,5 @@ function loop(now) {
   R.render(scene, cam);
 }
 requestAnimationFrame(loop);
+if (new URLSearchParams(location.search).get('quick') === '1') { setTimeout(() => { fresh(); sock.emit('quick', nm()); }, 350); $('bQuick').textContent = mode === 'ranked' ? 'Searching Ranked…' : 'Searching League…'; }
 })();

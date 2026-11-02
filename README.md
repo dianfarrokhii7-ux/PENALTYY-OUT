@@ -1,5 +1,5 @@
 # PENALTY OUT
-Online 3D football for two real players — **Penalty Shootout** (`/`) and **Friendly Match 6v6** (`/friendly.html`).
+Online 3D football for two real players — **Penalty Shootout** (`/`), **Friendly Match 6v6** (`/friendly.html`), plus **Pro League & Ranked** (`/competitive.html`).
 Three.js + Node + Express + Socket.IO. Teams: Barcelona, Real Madrid, Mashin Jadid.
 
 ## Run locally
@@ -59,3 +59,10 @@ After both players are connected **and** have confirmed their line-ups, the host
 - **Code quality**: formations live in `shared.js` (one source for server and clients), new tests (`test/squads.js`, `test/lineup.js`), CI workflow, `render.yaml`, ESLint config, `docs/ARCHITECTURE.md`.
 
 - **Scoreboard**: new artwork (`scoreboard.png`) used in both modes: team names and usernames in the side bars, scores in the small hexagons, clock (or PENALTY) in the centre; kick dots sit under the names in the shootout.
+
+## Pro League & Ranked (v8 update)
+- Open `/competitive.html` from the main menu to view Ranked rating/leaderboard and Pro League season table.
+- Queue for a competitive 6v6 match with `FIND RANKED MATCH` or `PLAY LEAGUE MATCH`; two players in the same queue mode are paired.
+- Ranked uses an Elo-style rating (starting at 1000); Pro League awards 3/1/0 points.
+- Completed competitive 6v6 match results are saved in `competitive-data.json` on the server.
+- The page refreshes leaderboards every 15 seconds.
