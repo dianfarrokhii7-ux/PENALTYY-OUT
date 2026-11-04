@@ -82,7 +82,7 @@ function aerial(r, p, a, i) {
   p.st = 4; p.stt = .45;
 }
 function shoot(r, p, pw, az) {
-  const B = r.ball, gx = dirOf(r, p.t) * L, dist = hyp(gx-B.x, B.z), acc = clamp(1.45 - p.sho * .0095, .55, 1.2), j = (rnd() - .5) * pw * pw * 1.6 * acc; let aimZ = az; if (dist > 16 && rnd() > .20) aimZ += (rnd() < .5 ? -1 : 1) * (3.4 + rnd() * 2.2); const ex = gx - B.x, ez = clamp(aimZ + j, -6.2, 6.2) - B.z, e = hyp(ex, ez) || 1, sp = (13 + pw * 15) * clamp(1 + (p.sho - 75) * .005, .88, 1.12);
+  const B = r.ball, gx = dirOf(r, p.t) * L, acc = clamp(1.45 - p.sho * .0095, .55, 1.2), j = (rnd() - .5) * pw * pw * 1.6 * acc, ex = gx - B.x, ez = clamp(az + j, -3.2, 3.2) - B.z, e = hyp(ex, ez) || 1, sp = (13 + pw * 15) * clamp(1 + (p.sho - 75) * .005, .88, 1.12);
   r.st[p.t].shots++; kick(r, p, ex / e * sp, ez / e * sp, 1.2 + pw * 3.2);
 }
 function tackle(r, p) { if (p.tk > 0 || p.st === 1 || p.red || p.stun > 0) return; r.st[p.t].tackles++; p.st = 1; p.stt = .4; p.tk = 1.3; p.hit = false; r.ev.push({ k: 'tackle' }); }
@@ -183,7 +183,6 @@ function zoneAI(r, p) {
     tx = tx * .4 + ox * .6; tz = tz * .4 + oz * .6;
     for (const q of r.P) if (q.t === p.t && q !== p && q.s > 0 && !q.red && hyp(q.x - tx, q.z - tz) < 3.5) { const n = hyp(tx - q.x, tz - q.z) || 1; tx += (tx - q.x) / n * 1.5; tz += (tz - q.z) / n * 1.5; }
   }
-  if (dead && rs && rs.type === 'corner' && rs.team === p.t && [2,3,4].includes(p.s)) { const lane = p.s - 3; tx = d * (L - (p.s === 3 ? 3.2 : 5.2)); tz = lane * 2.6; spd = 7.2; }
   if (!owner && !dead && Math.abs(B.x - hx) < ZX + 1.5 && Math.abs(B.z - hz) < ZZ + 1.5) { tx = B.x + B.vx * .25; tz = B.z + B.vz * .25; spd = 6.6; }
   tx = clamp(clamp(tx, hx - ZX, hx + ZX), -L + 2, L - 2); tz = clamp(clamp(tz, hz - ZZ, hz + ZZ), -W + 1, W - 1);
   if (dead && p.t !== rs.team && hyp(tx - B.x, tz - B.z) < 6) { const n = hyp(p.x - B.x, p.z - B.z) || 1; tx = B.x + (p.x - B.x) / n * 6; tz = B.z + (p.z - B.z) / n * 6; }
