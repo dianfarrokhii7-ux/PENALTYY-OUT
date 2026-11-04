@@ -210,7 +210,7 @@ function animate(e, dt, B, celeb) {
 
 /* ---------- game state / input ---------- */
 const Bl = { x: 0, y: BR, z: 0, o: -1 }, bt = { x: 0, y: BR, z: 0 };
-let S = null, flip = 0, celeb = -1, celebT = 0, camPos = new THREE.Vector3(0, 18, 24), camLook = new THREE.Vector3(), dmCur = 1, tmpV = new THREE.Vector3();
+let S = null, flip = 0, celeb = -1, celebT = 0, camOverride = 'b', replay = null, recFrames = [], savedMatch = false, matchStartedAt = 0, camPos = new THREE.Vector3(0, 18, 24), camLook = new THREE.Vector3(), dmCur = 1, tmpV = new THREE.Vector3();
 const keys = {}, inp = { sx: 0, sy: 0, sp: 0 }; let joy = { x: 0, y: 0 }, spBtn = false, chargeT = 0, lastSent = '', lastSendAt = 0;
 const act = (t, p, x) => sock.emit('act', { t, p, ...x });
 function startCharge() { if (!chargeT) chargeT = performance.now(); }
@@ -262,7 +262,7 @@ function applyTime(night) {
   const pm = scene.children.find(o => o.geometry && o.geometry.type === 'PlaneGeometry' && o.geometry.parameters.width === 56); if (pm) pm.material.color.setHex(night ? 0x9c9c9c : 0xbcbcbc);
 }
 applyTime(true);
-function show(id) { ['home', 'lobby', 'lineup', 'settings', 'end'].forEach(s => $(s).classList.toggle('hide', s !== id)); }
+function show(id) { ['home', 'lobby', 'lineup', 'settings', 'reporter', 'end'].forEach(s => $(s).classList.toggle('hide', s !== id)); }
 sock.on('room', d => {
   room = d; if (me < 0) return;
   [0, 1].forEach(i => { const e = $('p' + i), nm = (d.names && d.names[i]) || (i === me ? 'You' : 'Opponent'); e.textContent = nm + (i === me ? ' (you)' : '') + (d.on[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.on[i]); });
@@ -290,13 +290,13 @@ $('bGo').onclick = () => { sock.emit('ready'); $('bGo').disabled = true; };
 $('bStart').onclick = () => { sock.emit('lineup', LE.value()); sock.emit('ready'); $('bStart').disabled = true; };
 sock.on('start', d => {
   room = { ...(room || {}), team: d.team }; buildPlayers(d.team, d.lu); G = d; applyTime(!d.set || !!d.set.night);
-  $('menu').classList.add('off'); $('hud').classList.remove('hide'); if (matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window) { $('fpad').classList.remove('hide'); $('help').classList.add('hide'); }
+  $('menu').classList.add('off'); $('hud').classList.remove('hide'); $('viewTools').classList.remove('hide'); if (matchMedia('(pointer:coarse)').matches || 'ontouchstart' in window) { $('fpad').classList.remove('hide'); $('help').classList.add('hide'); }
   [0, 1].forEach(i => { const el = $('n' + i), nm = (room && room.names && room.names[i]) || ''; el.textContent = TEAMS[d.team[i]].n; if (nm) { const sm = document.createElement('small'); sm.textContent = nm + (i === me ? ' (you)' : ''); el.appendChild(sm); } });
   $('bSubs').classList.remove('hide'); crowdStart();
 });
 sock.on('shootout', d => { sessionStorage.removeItem('pof'); sessionStorage.setItem('po', JSON.stringify({ code: d.code, token: d.token })); location.href = '/'; });   // continue in the penalty-shootout mode
 sock.on('snap', s => {
-  S = s; flip = s.fl; Bl.o = s.b[3]; bt.x = s.b[0]; bt.y = s.b[1]; bt.z = s.b[2];
+  S = s; if (G && !replay) { recFrames.push(JSON.parse(JSON.stringify(s))); if (recFrames.length > 1200) recFrames.shift(); } flip = s.fl; Bl.o = s.b[3]; bt.x = s.b[0]; bt.y = s.b[1]; bt.z = s.b[2];
   s.p.forEach((p, i) => { const e = ents[i]; if (!e) return; e.tx = p[0]; e.tz = p[1]; e.ta = p[2]; e.st = p[3]; e.red = p[4]; e.sp = p[5]; e.vz = p[7] || 0; });
   txt('s0', s.s[0]); txt('s1', s.s[1]); txt('clk', `${['1st', '2nd', 'ET 1', 'ET 2'][s.h - 1] || '2nd'}  ${Math.floor(s.c / 60)}:${String(s.c % 60).padStart(2, '0')}`);
   const ce = ents[s.k[me]]; if (ce && ce !== whoE) { whoE = ce; $('who').innerHTML = `${esc(ce.name)} #${ce.num} <b>${POF.ovr(ce.q)}</b><small>${statLine(ce.q)}</small>`; } else if (!ce) $('who').textContent = '';
@@ -311,7 +311,7 @@ sock.on('ev', list => list.forEach(e => {
   else if (e.k === 'save') { beep(200, .25, 'sawtooth', .12); crowd(.22, 700, 2.5); }
   else if (e.k === 'win') beep(240, .1, 'triangle', .12);
   else if (e.k === 'restart') { beep(2400, .25, 'square', .05); if (e.type !== 'kickoff') banner(RS[e.type]); }
-  else if (e.k === 'goal') { startRipple(); celeb = e.t; celebT = 3.2; banner(e.t === me ? 'GOAL!' : 'GOAL FOR OPPONENT', e.t === me ? '#2ecc71' : '#e63946'); [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)); crowd(.45, 1000, 4.5); }
+  else if (e.k === 'goal') { if (recFrames.length > 25 && !replay) beginReplay(); startRipple(); celeb = e.t; celebT = 3.2; banner(e.t === me ? 'GOAL!' : 'GOAL FOR OPPONENT', e.t === me ? '#2ecc71' : '#e63946'); [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)); crowd(.45, 1000, 4.5); }
   else if (e.k === 'foul') { beep(2400, .5, 'square', .06); banner(e.card === 'r' ? 'RED CARD' : e.card === 'y' ? 'YELLOW CARD' : e.pen ? 'FOUL — PENALTY' : 'FOUL', e.card === 'r' ? '#e63946' : '#ffd23f'); crowd(.2, 450, 2.5); }
   else if (e.k === 'penres') { if (e.res !== 'goal') banner(e.res === 'save' ? 'SAVED!' : e.res === 'post' ? 'OFF THE POST!' : 'MISSED!', '#e63946'); }
   else if (e.k === 'dribble') { beep(e.ok ? 660 : 130, e.ok ? .12 : .2, e.ok ? 'triangle' : 'sawtooth', .12); if (e.t === me) banner(e.ok ? 'SKILL MOVE!' : 'HEAVY TOUCH', e.ok ? '#2ecc71' : '#e63946'); }
@@ -322,12 +322,12 @@ sock.on('ev', list => list.forEach(e => {
   else if (e.k === 'post') { beep(1100, .2, 'square', .12); crowd(.2, 900, 1.5); }
   else if (e.k === 'shootout') banner('PENALTY SHOOTOUT', '#ffd23f');
   else if (e.k === 'half') { banner(e.h === 3 ? 'EXTRA TIME' : e.h === 4 ? 'EXTRA TIME — 2ND HALF' : 'HALF TIME', '#ffd23f'); beep(2000, .8, 'square', .06); }
-  else if (e.k === 'end') { $('hud').classList.add('hide'); $('fpad').classList.add('hide'); $('menu').classList.remove('off'); show('end'); sessionStorage.removeItem('pof'); const a = e.score[me], b = e.score[1 - me]; $('endT').textContent = `${a > b ? 'YOU WIN' : a < b ? 'YOU LOSE' : 'DRAW'}  ${a} – ${b}`; $('subs').classList.add('hide'); $('bSubs').classList.add('hide'); showStats(e.st); }
+  else if (e.k === 'end') { saveMatchArchive(e); $('viewTools').classList.add('hide'); $('hud').classList.add('hide'); $('fpad').classList.add('hide'); $('menu').classList.remove('off'); show('end'); sessionStorage.removeItem('pof'); const a = e.score[me], b = e.score[1 - me]; $('endT').textContent = `${a > b ? 'YOU WIN' : a < b ? 'YOU LOSE' : 'DRAW'}  ${a} – ${b}`; $('subs').classList.add('hide'); $('bSubs').classList.add('hide'); showStats(e.st); }
 }));
 
 /* ---------- menu ---------- */
 document.querySelectorAll('.team').forEach(b => b.onclick = () => { myTeam = b.dataset.t; sock.emit('team', myTeam); document.querySelectorAll('.team').forEach(x => x.classList.toggle('sel', x === b)); });
-const fresh = () => { sessionStorage.removeItem('pof'); luInit = false; };
+const fresh = () => { sessionStorage.removeItem('pof'); luInit = false; recFrames=[]; savedMatch=false; replay=null; camOverride='b'; };
 const mode = new URLSearchParams(location.search).get('mode'); const nm = () => ({ name: POF.name(), mode: ['ranked','league'].includes(mode) ? mode : 'friendly' });
 $('bQuick').onclick = () => { fresh(); sock.emit('quick', nm()); }; $('bCreate').onclick = () => { fresh(); sock.emit('create', nm()); }; $('bJoin').onclick = () => { fresh(); sock.emit('join', { code: $('code').value, ...nm() }); };
 const nameBtn = () => { $('bName').textContent = 'Player: ' + POF.name() + '  ✎'; };
@@ -355,6 +355,14 @@ function showStats(st) {
   $('endStats').innerHTML = row('Possession %', a.poss, b.poss) + row('Shots', a.shots, b.shots) + row('Passes', a.passes, b.passes) + row('Tackles', a.tackles, b.tackles) + row('Fouls', a.fouls, b.fouls) + row('Dribbles won', `${a.drOk}/${a.dr}`, `${b.drOk}/${b.dr}`);
 }
 
+/* ---------- Match Reporter, multi-angle broadcast and goal replay ---------- */
+function archiveRead(){try{return JSON.parse(localStorage.getItem('pof_match_archive')||'[]')}catch(e){return []}}
+function saveMatchArchive(e){if(savedMatch||!recFrames.length)return;savedMatch=true;const a=archiveRead();a.unshift({id:Date.now(),date:new Date().toLocaleString(),teams:(G&&G.team)||['BAR','RMA'],names:(room&&room.names)||['Player 1','Player 2'],score:e.score,frames:recFrames.slice(-1200)});localStorage.setItem('pof_match_archive',JSON.stringify(a.slice(0,8)));}
+function openReporter(){const a=archiveRead(),box=$('matchList');box.innerHTML=a.length?a.map((m,i)=>`<button data-match="${i}"><b>${m.score[0]} – ${m.score[1]}</b> · ${esc(m.date||'Match')}<small style="display:block;opacity:.65">${(m.names||[]).map(esc).join(' vs ')} · ${(m.frames||[]).length} frames</small></button>`).join(''):'<p class="sub">No saved matches yet. Finish an online friendly to save it here.</p>';box.querySelectorAll('[data-match]').forEach(b=>b.onclick=()=>{const m=a[+b.dataset.match];if(!m.frames||m.frames.length<2)return;show('reporter');$('menu').classList.add('off');$('hud').classList.remove('hide');$('viewTools').classList.remove('hide');recFrames=m.frames;replay={frames:m.frames,idx:0,slow:false,view:camOverride,archive:true};$('replaySkip').classList.remove('hide');});}
+function beginReplay(){if(recFrames.length<2)return;replay={frames:recFrames.slice(-Math.min(100,recFrames.length)),idx:0,slow:true,view:camOverride};$('replaySkip').classList.remove('hide');$('replayLabel').textContent='GOAL REPLAY · SLOW';}
+function endReplay(){const wasArchive=!!(replay&&replay.archive);replay=null;$('replaySkip').classList.add('hide');$('replayLabel').textContent='';if(S){bt.x=S.b[0];bt.y=S.b[1];bt.z=S.b[2];S.p.forEach((p,i)=>{if(ents[i]){ents[i].tx=p[0];ents[i].tz=p[1];ents[i].ta=p[2];ents[i].st=p[3];ents[i].red=p[4];}})}if(wasArchive){$('menu').classList.remove('off');$('hud').classList.add('hide');show('reporter');$('viewTools').classList.add('hide')}}
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{camOverride=b.dataset.view;if(replay)replay.view=camOverride;});$('replaySkip').onclick=endReplay;
+$('bReporter').onclick=()=>{openReporter();show('reporter');};$('bReporterBack').onclick=()=>show('home');
 /* static scenery never moves: skip per-frame matrix updates */
 { const dyn = new Set([ball, bsh, ring, arrow, ...groups]); scene.children.forEach(o => { if (o.isMesh && !dyn.has(o)) { o.updateMatrix(); o.matrixAutoUpdate = false; } }); }
 let shadowsOn = true;
@@ -365,10 +373,11 @@ let last = performance.now(), frame = 0;
 function loop(now) {
   requestAnimationFrame(loop); QL.tick(now); const dt = Math.min((now - last) / 1000, .05); last = now; frame++;
   const dmv = (me === 1 ? -1 : 1) * (flip ? -1 : 1);
-  const cm = camMode(); if (G && S) sendInput(now, dmv, cm);
+  const cm = camMode(); if (G && S && !replay) sendInput(now, dmv, cm); const viewCm = replay ? {m: replay.view || camOverride} : {m: camOverride};
   if (!MOB || frame % 2 === 0) groups.forEach((g, i) => { g.position.y = Math.max(0, Math.sin(now / 1000 * (celebT > 0 ? 9 : 2.2) + i * 1.7)) * (celebT > 0 ? .45 : .06); });
   celebT = Math.max(0, celebT - dt);
   const k = Math.min(1, dt * 14);
+  if (replay) { const fr = replay.frames[Math.min(replay.idx, replay.frames.length - 1)]; if (fr) { bt.x=fr.b[0]; bt.y=fr.b[1]; bt.z=fr.b[2]; fr.p.forEach((p,i)=>{if(ents[i]){ents[i].tx=p[0];ents[i].tz=p[1];ents[i].ta=p[2];ents[i].st=p[3];ents[i].red=p[4];}}); replay.idx += dt * 15 * (replay.slow ? .45 : 1); $('replayLabel').textContent = replay.slow ? 'GOAL REPLAY · SLOW' : 'MATCH REPLAY'; if(replay.idx >= replay.frames.length-1) endReplay(); } }
   ents.forEach(e => {
     e.x += (e.tx - e.x) * k; e.z += (e.tz - e.z) * k; let da = e.ta - e.a; da = Math.atan2(Math.sin(da), Math.cos(da)); e.a += da * Math.min(1, dt * 12);
     e.g.visible = !e.red; e.sh.visible = !e.red && !shadowsOn; e.g.position.x = e.x; e.g.position.z = e.z; e.g.rotation.y = Math.atan2(Math.cos(e.a), Math.sin(e.a));
@@ -382,7 +391,10 @@ function loop(now) {
   if (ce) { ring.position.x = ce.x; ring.position.z = ce.z; arrow.position.set(ce.x, 2.25 + Math.sin(now / 200) * .08, ce.z); }
   dmCur += (dmv - dmCur) * Math.min(1, dt * 2);
   const bx = ball.position.x, bz = ball.position.z, V = THREE.Vector3; let tgt, look, kk = Math.min(1, dt * 3.5);
-  if (cm.m === 'pk') { tgt = tgtV.set(S.b[0] - cm.d * 5, 2, 0); look = lookV.set(cm.d * L, 1, 0); kk = Math.min(1, dt * 4); }
+  if (viewCm.m === 'top') { tgt = tgtV.set(0, 42, .01); look = lookV.set(bx, 0, bz); kk = Math.min(1, dt * 2.5); }
+  else if (viewCm.m === 'goal') { const side = bx >= 0 ? 1 : -1; tgt = tgtV.set(side * (L + 8), 3.5, bz * .25); look = lookV.set(side * (L - 5), 1.1, bz); kk = Math.min(1, dt * 3); }
+  else if (viewCm.m === 'ball') { tgt = tgtV.set(bx - Math.sign(bx || 1) * 5, 5.5, bz + 4); look = lookV.set(bx, .5, bz); kk = Math.min(1, dt * 4); }
+  else if (cm.m === 'pk') { tgt = tgtV.set(S.b[0] - cm.d * 5, 2, 0); look = lookV.set(cm.d * L, 1, 0); kk = Math.min(1, dt * 4); }
   else if (cm.m === 'pg') { tgt = tgtV.set(cm.d * (L + 4.5), 2.7, 0); look = lookV.set(cm.d * (L - 6), .9, 0); kk = Math.min(1, dt * 4); }
   else if (cm.m === 'fk') { const gx = dmv * L, dx = gx - bx, dz = -bz, n = Math.hypot(dx, dz) || 1; tgt = tgtV.set(bx - dx / n * 5, 2.3, bz - dz / n * 5); look = lookV.set(gx, 1, 0); kk = Math.min(1, dt * 4); }
   else { const q = Math.max(0, bz * dmCur), asp = cam.aspect < 1; tgt = tgtV.set(clamp(bx * .8, -19, 19), (asp ? 22 : 15.5) + q * .25, dmCur * ((asp ? 26 : 21) + q * .9)); look = lookV.set(clamp(bx * .85, -22, 22), 0, bz * .55); }

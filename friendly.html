@@ -9,7 +9,7 @@
 <canvas id="c"></canvas>
 <div id="hud" class="hide">
   <div id="board"><div class="tm" id="n0"></div><div class="sc"><b id="s0">0</b>:<b id="s1">0</b></div><div class="tm" id="n1"></div><div id="clk"></div></div>
-  <div id="cross" class="hide"></div><div id="who"></div><div id="msg"></div><div id="banner"></div>
+  <div id="cross" class="hide"></div><div id="viewTools" class="hide"><button data-view="b">TV</button><button data-view="top">TOP</button><button data-view="goal">GOAL</button><button data-view="ball">BALL</button><button id="replaySkip" class="hide">SKIP REPLAY</button><span id="replayLabel"></span></div><div id="who"></div><div id="msg"></div><div id="banner"></div>
   <button id="bSubs" class="hide">SUBS 5</button>
   <div id="power"><i></i></div><div id="conn"></div>
   <div id="help">WASD move · Shift sprint · F pass · E cross · Space shoot / header (hold) · R dribble · C tackle · V switch · B subs</div>
@@ -30,7 +30,7 @@
     <p class="sub">Online friendly match. Two real players, AI teammates.</p>
     <button id="bName" class="namebtn"></button>
     <button class="big" id="bQuick">Play Online</button>
-    <button class="big alt" id="bCreate">Create Room</button>
+    <button class="big alt" id="bCreate">Create Room</button><button class="big alt" id="bReporter">MATCH REPORTER</button>
     <div class="row"><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button class="big alt" id="bJoin">Join Room</button></div>
     <div class="row sm"><button id="bSound">Sound: On</button><button id="bFull">Fullscreen</button></div>
     <a class="back" href="/">← Penalty shootout</a><p id="err"></p>
@@ -54,6 +54,7 @@
     <p class="sub">If the score is level after full time: extra time (2 &times; 1:00) if on, then a penalty shootout &mdash; the same mode as the main menu &mdash; if on. Otherwise the match ends in a draw.</p>
     <button class="big" id="bGo">Start match</button>
   </div>
+  <div id="reporter" class="screen hide"><h2>Match Reporter</h2><p class="sub">Saved matches on this device</p><div id="matchList"></div><button class="big alt" id="bReporterBack">Back</button></div>
   <div id="end" class="screen hide"><h2 id="endT"></h2><div id="endStats"></div><button class="big" onclick="location.href='/friendly.html'">Back to menu</button></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
