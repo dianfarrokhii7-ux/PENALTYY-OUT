@@ -3,6 +3,7 @@ const path = require('path');
 const { TEAM_KEYS, sanitizeName } = require('./shared.js');
 const http = require('http');
 const { Server } = require('socket.io');
+const fs = require('fs');
 
 const app = express();
 const srv = http.createServer(app);
@@ -13,7 +14,31 @@ const io = new Server(srv, {
 });
 app.disable('x-powered-by');
 // Only the client files are public — server-side sources (server.js, friendly.js, package.json…) are never served.
-const PUBLIC = new Set(['index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js', 'lineup.js', 'gamepad.js', 'scoreboard.png', 'reporter.html', 'reporter.js', 'reporter.css']);
+const PUBLIC = new Set(['competitive.html','competitive.css','competitive.js','index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js', 'lineup.js', 'gamepad.js', 'scoreboard.png']);
+
+const COMP_FILE = path.join(__dirname, 'competitive-data.json');
+let compData = { players: {} };
+try { compData = JSON.parse(fs.readFileSync(COMP_FILE, 'utf8')); } catch (_) {}
+function saveComp() { try { fs.writeFileSync(COMP_FILE, JSON.stringify(compData, null, 2)); } catch (e) { console.error('competitive save:', e.message); } }
+function playerData(name) { const n = sanitizeName(name) || 'Player'; return compData.players[n] || (compData.players[n] = { name:n, rating:1000, wins:0, losses:0, draws:0, leaguePoints:0, leaguePlayed:0, leagueWins:0, leagueDraws:0, leagueLosses:0, gf:0, ga:0 }); }
+function rankRecord(names, score, mode) {
+  names = (names || []).map(n => sanitizeName(n) || 'Player'); if (names.length < 2) return;
+  const a=playerData(names[0]), b=playerData(names[1]), x=+score[0]||0, y=+score[1]||0;
+  const expected=1/(1+Math.pow(10,(b.rating-a.rating)/400)), actual=x>y?1:x<y?0:.5, delta=Math.round(32*(actual-expected));
+  a.rating=Math.max(700,a.rating+delta); b.rating=Math.max(700,b.rating-delta);
+  a.gf+=x;a.ga+=y;b.gf+=y;b.ga+=x;
+  if(x>y){a.wins++;b.losses++;}else if(y>x){b.wins++;a.losses++;}else{a.draws++;b.draws++;}
+  if(mode==='league'){for(const [p,sc,opp] of [[a,x,y],[b,y,x]]){p.leaguePlayed++;p.leaguePoints+=sc>opp?3:sc===opp?1:0;if(sc>opp)p.leagueWins++;else if(sc===opp)p.leagueDraws++;else p.leagueLosses++;}}
+  saveComp();
+}
+app.get('/api/competitive', (req,res) => {
+ const name=sanitizeName(req.query.name)||'Player', p=playerData(name);
+ const all=Object.values(compData.players);
+ const ranked=all.slice().sort((a,b)=>b.rating-a.rating).map(x=>({name:x.name,rating:x.rating,wins:x.wins}));
+ const league=all.slice().sort((a,b)=>b.leaguePoints-a.leaguePoints||((b.gf-b.ga)-(a.gf-a.ga))).map(x=>({name:x.name,played:x.leaguePlayed,wins:x.leagueWins,draws:x.leagueDraws,losses:x.leagueLosses,gf:x.gf,ga:x.ga,points:x.leaguePoints}));
+ res.json({player:p,ranked,league});
+});
+
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: Object.keys(rooms).length, uptime: Math.round(process.uptime()) }));
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/:file', (req, res, next) => PUBLIC.has(req.params.file) ? res.sendFile(path.join(__dirname, req.params.file), { maxAge: '5m' }) : next());
@@ -214,5 +239,5 @@ io.on('connection', socket => {
 });
 
 const port = process.env.PORT || 3000;
-require('./friendly').attach(io, { shootout: shootoutRoom });
+require('./friendly').attach(io, { shootout: shootoutRoom, onFinish: r => { if (r.mode && !r.compSaved) { rankRecord(r.names, r.score, r.mode); r.compSaved = true; } } });
 srv.listen(port, () => console.log('PENALTY OUT on port ' + port));
