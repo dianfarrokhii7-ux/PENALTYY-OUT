@@ -83,7 +83,7 @@ function aerial(r, p, a, i) {
 }
 function shoot(r, p, pw, az) {
   const B = r.ball, gx = dirOf(r, p.t) * L, acc = clamp(1.45 - p.sho * .0095, .55, 1.2), j = (rnd() - .5) * pw * pw * 1.6 * acc, ex = gx - B.x, ez = clamp(az + j, -3.2, 3.2) - B.z, e = hyp(ex, ez) || 1, sp = (13 + pw * 15) * clamp(1 + (p.sho - 75) * .005, .88, 1.12);
-  r.st[p.t].shots++; B.longShot = hyp(gx - B.x, B.z) > 16; kick(r, p, ex / e * sp, ez / e * sp, 1.2 + pw * 3.2);
+  r.st[p.t].shots++; kick(r, p, ex / e * sp, ez / e * sp, 1.2 + pw * 3.2);
 }
 function tackle(r, p) { if (p.tk > 0 || p.st === 1 || p.red || p.stun > 0) return; r.st[p.t].tackles++; p.st = 1; p.stt = .4; p.tk = 1.3; p.hit = false; r.ev.push({ k: 'tackle' }); }
 function foul(r, p, v, behind) {
@@ -105,7 +105,7 @@ function act(r, t, a) {
   const p = r.P[r.ctrl[t]]; if (!p || p.red || !['play', 'dead'].includes(r.ph)) return; const B = r.ball, i = r.inp[t];
   if (r.pen && r.ph === 'dead') {
     const pn = r.pen;
-    if (a.t === 'shoot' && t === pn.t && pn.st === 'aim' && pn.tt >= 5) penShoot(r, clamp(+a.p || .5, .25, 1));
+    if (a.t === 'shoot' && t === pn.t && pn.st === 'aim') penShoot(r, clamp(+a.p || .5, .25, 1));
     else if (a.t === 'dive' && t === 1 - pn.t && pn.st === 'fly' && !pn.dive) { const dir = clamp(Math.round(+a.dir || 0), -1, 1); pn.dive = { dz: -pn.d * dir * 2.6, hi: !!a.hi || !dir, at: pn.tt }; }
     return;
   }
@@ -258,9 +258,6 @@ function aiFull(r, p) {
     return aim(p, tgt.x + (tgt.vx || 0) * lead, tgt.z + (tgt.vz || 0) * lead, 6.6);
   }
   let tx = clamp(f[0] * L * d + B.x * .3, -L + 2, L - 2), tz = clamp(f[1] * W + B.z * .3, -W + 1, W - 1);
-  if (dead && rs.type === 'corner' && p.t === rs.team && p.s >= 1 && p.s <= 3) {
-    tx = d * (L - 5.2 - (p.s - 1) * 1.2); tz = (p.s - 2) * 2.2;
-  }
   if (dead && p.t !== rs.team && hyp(tx - B.x, tz - B.z) < 6) { const n = hyp(p.x - B.x, p.z - B.z) || 1; tx = B.x + (p.x - B.x) / n * 6; tz = B.z + (p.z - B.z) / n * 6; }
   return aim(p, tx, tz, 5.6);
 }
@@ -353,11 +350,7 @@ function outCheck(r) {
   }
   if (Math.abs(B.x) > L) {
     const e = Math.sign(B.x);
-    if (Math.abs(B.z) < GW && B.y < 2) {
-      const scorer = dirOf(r, 0) === e ? 0 : 1;
-      if (B.longShot && Math.random() >= .20) { B.longShot = false; setRestart(r, 'goalkick', 1 - scorer, e * (L - 2), 0); return; }
-      B.longShot = false; end(r, scorer); return;
-    }
+    if (Math.abs(B.z) < GW && B.y < 2) { end(r, dirOf(r, 0) === e ? 0 : 1); return; }
     const def = dirOf(r, 0) === -e ? 0 : 1;
     if (r.last === def) setRestart(r, 'corner', 1 - def, e * L, Math.sign(B.z || 1) * W); else setRestart(r, 'goalkick', def, e * (L - 2), 0);
   } else if (Math.abs(B.z) > W) setRestart(r, 'throwin', 1 - r.last, clamp(B.x, -L + 1, L - 1), Math.sign(B.z) * W);
@@ -377,8 +370,6 @@ function attach(io, hooks = {}) {
   const mkRoom = () => { let c; do c = Math.random().toString(36).slice(2, 6).toUpperCase(); while (rooms[c]); return rooms[c] = mk(c); };
   const join = (s, r, name) => { const i = r.sk[0] ? (r.sk[1] ? -1 : 1) : 0; i < 0 ? s.emit('err', 'Room is full') : seat(r, s, i, name); };
   ns.on('connection', s => {
-    s.on('listMatches', () => s.emit('matches', Object.values(rooms).filter(r => r.P.length && ['play','dead','goal'].includes(r.ph)).map(r => ({code:r.code, names:r.names, team:r.team, score:r.score, ph:r.ph, clock:Math.ceil(r.clock)}))));
-    s.on('spectate', d => { const r = d && rooms[String(d.code||'').toUpperCase()]; if (!r || !r.P.length) return s.emit('spectateError','Match unavailable'); s.join(r.code); s.emit('spectateStart',{code:r.code, snap:snap(r)}); });
     s.on('create', d => seat(mkRoom(), s, 0, d && d.name));
     s.on('join', d => { const c = typeof d === 'string' ? d : d && d.code, r = rooms[String(c || '').toUpperCase().trim()]; r ? join(s, r, d && d.name) : s.emit('err', 'Room not found'); });
     s.on('quick', d => { const nm = d && d.name, mode = ['ranked','league'].includes(d && d.mode) ? d.mode : 'friendly';
