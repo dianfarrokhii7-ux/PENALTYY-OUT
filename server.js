@@ -14,7 +14,7 @@ const io = new Server(srv, {
 });
 app.disable('x-powered-by');
 // Only the client files are public — server-side sources (server.js, friendly.js, package.json…) are never served.
-const PUBLIC = new Set(['competitive.html','competitive.css','competitive.js','index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js', 'lineup.js', 'gamepad.js', 'scoreboard.png']);
+const PUBLIC = new Set(['competitive.html','competitive.css','competitive.js','index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js', 'lineup.js', 'gamepad.js', 'scoreboard.png','reporter.html','reporter.css','reporter.js']);
 
 const COMP_FILE = path.join(__dirname, 'competitive-data.json');
 let compData = { players: {} };
