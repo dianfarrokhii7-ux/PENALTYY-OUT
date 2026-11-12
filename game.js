@@ -4,7 +4,7 @@ const SQ = POF.SQUADS, KIT = { BAR: [0xa50044, 0x004d98], RMA: [0xf2f2f2, 0xf2f2
 POF.TEAM_KEYS.forEach(k => TEAMS[k] = { n: SQ[k].n, c: KIT[k][0], c2: KIT[k][1], r: SQ[k].r.slice(0, 6).map(p => p.n) });   // r[0] = goalkeeper, r[1..5] = penalty takers
 const pname = (d, i) => (d && d.names && d.names[i]) || (i === me ? 'You' : 'Opponent');
 let myTeam = 'BAR', me = -1, st = null, ph = 'idle', role = 'shooter', snd = true;
-const sock = io(), keys = {};
+const sock = io(), keys = {}, REP = new URLSearchParams(location.search).get('mode') === 'reporter';
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 /* ---------- audio ---------- */
@@ -123,7 +123,7 @@ let kicker = null, keeper = null, kx = 0, kxT = 0, dv = null, cel = null, B = { 
 let ax = 0, ay = .35, pw = 0, charging = false;
 
 function setupTurn(d) {
-  st = d; ph = 'aim'; role = me === st.turn ? 'shooter' : 'keeper';
+  st = d; ph = 'aim'; role = REP ? 'reporter' : me === st.turn ? 'shooter' : 'keeper';
   [kicker, keeper].forEach(o => o && scene.remove(o));
   const tt = TEAMS[st.team[st.turn]];
   kicker = person(tt.c, tt.c2 === tt.c ? 0x14143a : tt.c2); kicker.position.set(0, 0, 3.2); scene.add(kicker);
@@ -131,9 +131,9 @@ function setupTurn(d) {
   kx = kxT = 0; dv = null; cel = null; ax = 0; ay = .35; pw = 0; charging = false; B = { mode: 'rest' }; kickAnim = 0; ball.position.set(0, BR, 0);
   const slot = d.slot, ot = TEAMS[st.team[1 - st.turn]];
   $('taker').textContent = `${tt.r[slot % 5 + 1]}  vs  ${ot.r[0]} (GK)`;
-  $('role').textContent = role === 'shooter' ? 'YOUR PENALTY — aim, hold SPACE to charge, release to shoot' : 'DEFEND — move with A / D, then dive with ← → once the ball is struck';
+  $('role').textContent = role === 'reporter' ? 'LIVE PENALTY SHOOTOUT · REPORTER' : role === 'shooter' ? 'YOUR PENALTY — aim, hold SPACE to charge, release to shoot' : 'DEFEND — move with A / D, then dive with ← → once the ball is struck';
   $('cross').classList.toggle('hide', role !== 'shooter'); $('power').classList.toggle('hide', role !== 'shooter'); $('power').firstChild.style.width = '0';
-  padRole(); hud(); sfx.whistle();
+  if (REP) { $('pad').classList.add('hide'); $('cross').classList.add('hide'); $('power').classList.add('hide'); } else padRole(); hud(); sfx.whistle();
 }
 function padRole() {
   const s = role === 'shooter'; $('padAim').classList.toggle('hide', !s); $('shootBtn').classList.toggle('hide', !s); $('padL').classList.toggle('hide', s); $('padDive').classList.toggle('hide', s);
@@ -144,7 +144,7 @@ function hud() {
     { const el = $('n' + i); el.textContent = TEAMS[st.team[i]].n; const sm = document.createElement('small'); sm.textContent = pname(st, i) + (i === me ? ' (you)' : ''); el.appendChild(sm); } $('s' + i).textContent = st.score[i];
     const L = st.log[i], n = Math.max(5, L.length); $('d' + i).innerHTML = Array.from({ length: n }, (_, j) => `<i class="${L[j] === 1 ? 'g' : L[j] === 0 ? 'm' : ''}"></i>`).join('');
   });
-  $('conn').textContent = st.conn[1 - me] ? '' : 'Opponent disconnected — waiting for reconnection…';
+  $('conn').textContent = REP ? 'LIVE · READ ONLY' : (st.conn[1 - me] ? '' : 'Opponent disconnected — waiting for reconnection…');
 }
 function banner(t, c) { const b = $('banner'); b.textContent = t; b.style.color = c; b.classList.add('show'); setTimeout(() => b.classList.remove('show'), 2200); }
 
@@ -156,12 +156,12 @@ function doDive(sd, hi) {
 function startDive(dir, hi) { dv = { t: 0, dir, hi, x0: kx }; }
 const DIVES = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], DiveL: [-1, 0], DiveR: [1, 0], DiveHL: [-1, 1], DiveHR: [1, 1], DiveUp: [0, 1], Space: [0, 1] };
 function kd(code) {
-  if (keys[code]) return; keys[code] = true;
+  if (REP || keys[code]) return; keys[code] = true;
   if (role === 'keeper' && DIVES[code]) doDive(DIVES[code][0], DIVES[code][1] || !!keys.ArrowUp);
   if (role === 'shooter' && code === 'Space' && ph === 'aim') { charging = true; pw = 0; }
 }
 function ku(code) {
-  keys[code] = false;
+  if (REP) return; keys[code] = false;
   if (role === 'shooter' && code === 'Space' && charging && ph === 'aim') {
     charging = false; if (pw < .05) return; ph = 'sent'; sock.emit('shoot', { ax, ay, pw });
   }
@@ -175,17 +175,40 @@ document.querySelectorAll('#pad button').forEach(b => {
 
 /* ---------- network ---------- */
 const sess = () => JSON.parse(sessionStorage.getItem('po') || 'null');
-sock.on('connect', () => { const s = sess(); if (s) sock.emit('rejoin', s); });
+sock.on('connect', () => { if (REP) { $('menu').classList.remove('off'); $('home').classList.add('hide'); $('reporter').classList.remove('hide'); $('pad').classList.add('hide'); $('repExit').classList.add('hide'); sock.emit('spec:list'); } else { const s = sess(); if (s) sock.emit('rejoin', s); } });
 sock.on('err', m => { $('err').textContent = m; if (!$('menu').classList.contains('off')) return; banner(m, '#ffd23f'); });
 sock.on('joined', d => {
   me = d.i; sessionStorage.setItem('po', JSON.stringify({ code: d.code, token: d.token }));
   $('home').classList.add('hide'); $('lobby').classList.remove('hide'); $('rc').textContent = d.code;
 });
 sock.on('room', d => {
+  if (REP) { repSync(d); return; }
   st = d; hud();
   [0, 1].forEach(i => { const e = $('p' + i); e.textContent = pname(d, i) + (i === me ? ' (you)' : '') + (d.conn[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.conn[i]); }); lobbyUI(d);
 });
 sock.on('start', d => { crowdStart(); st = d; $('menu').classList.add('off'); $('hud').classList.remove('hide'); $('pad').classList.remove('hide'); hud(); });
+sock.on('spec:list', list => {
+  const box = $('penRepList');
+  if (!box) return;
+  box.innerHTML = list.length ? list.map(m => `<button class="big alt" data-code="${String(m.code).replace(/[^A-Z0-9]/g,'')}"><b>${TEAMS[m.team[0]]?.n || m.team[0]} ${m.score[0]} – ${m.score[1]} ${TEAMS[m.team[1]]?.n || m.team[1]}</b><small>${m.names.map(n => String(n || 'Player').replace(/[&<>"']/g,'')).join(' vs ')} · PENALTY OUT · 👁 ${m.watchers}</small></button>`).join('') : '<p class="sub">No penalty shootout is being played right now. This list refreshes automatically.</p>';
+  box.querySelectorAll('button[data-code]').forEach(b => b.onclick = () => sock.emit('spec:watch', { code:b.dataset.code }));
+});
+sock.on('spec:start', d => {
+  if (!REP) return;
+  me = -1; st = d; $('menu').classList.add('off'); $('reporter').classList.add('hide'); $('hud').classList.remove('hide'); $('pad').classList.add('hide'); $('repExit').classList.remove('hide'); crowdStart();
+  repSync(d);
+});
+function repSync(d) {
+  if (!REP || !d || !d.team || !d.score) return;
+  st = d; me = -1;
+  if (d.phase === 'end') { $('menu').classList.remove('off'); $('reporter').classList.remove('hide'); $('hud').classList.add('hide'); $('penRepErr').textContent = 'This match has ended.'; sock.emit('spec:leave'); sock.emit('spec:list'); return; }
+  $('menu').classList.add('off'); $('hud').classList.remove('hide'); $('pad').classList.add('hide'); $('repExit').classList.remove('hide');
+  if (d.phase === 'aim' || d.phase === 'idle' || !kicker) setupTurn({ ...d, slot:d.slot == null ? d.kicks[d.turn] % 5 : d.slot });
+  if (d.phase === 'idle') { ph = 'idle'; return; }
+  if (d.phase === 'flight' && d.shot) { kx = kxT = d.kx || 0; if (keeper) keeper.position.x = kx; applyShot({ ...d.shot, dive:d.dive }, true); }
+  else if (d.phase === 'result' && d.lastResult) { B = { mode:'rest' }; applyResult(d.lastResult, true); }
+}
+
 sock.on('turn', setupTurn);
 sock.on('kx', x => { kxT = x; });
 sock.on('dive', d => startDive(d.dir, d.hi));
@@ -245,6 +268,7 @@ sock.on('sync', d => {
   }
 });
 sock.on('end', d => {
+  if (REP) { sock.emit('spec:leave'); $('menu').classList.remove('off'); $('reporter').classList.remove('hide'); $('hud').classList.add('hide'); $('repExit').classList.add('hide'); sock.emit('spec:list'); return; }
   sessionStorage.removeItem('po'); $('hud').classList.add('hide'); $('pad').classList.add('hide'); $('menu').classList.remove('off'); $('home').classList.add('hide'); $('lobby').classList.add('hide'); $('end').classList.remove('hide');
   $('endT').textContent = `${d.winner === me ? 'YOU WIN' : 'YOU LOSE'}  ${d.score[me]} – ${d.score[1 - me]}`;
 });
@@ -258,6 +282,8 @@ function lobbyUI(d) {
   const on = pname(d, 1 - me);
   $('lmsg').textContent = !both ? 'Waiting for your opponent to join…' : mine ? 'Waiting for ' + on + ' to be ready…' : opp ? on + ' picked ' + TEAMS[opp].n + '. Choose yours, then press Ready.' : 'Both players connected. Choose your team, then press Ready.';
 }
+if (REP) setInterval(() => { if (!$('menu').classList.contains('off')) sock.emit('spec:list'); }, 4000);
+if (REP) $('repExit').onclick = () => { sock.emit('spec:leave'); $('menu').classList.remove('off'); $('reporter').classList.remove('hide'); $('hud').classList.add('hide'); $('repExit').classList.add('hide'); sock.emit('spec:list'); };
 /* ---------- menu ---------- */
 document.querySelectorAll('.team').forEach(b => b.onclick = () => { document.querySelectorAll('.team').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); myTeam = b.dataset.t; });
 const nm = () => ({ name: POF.name() });

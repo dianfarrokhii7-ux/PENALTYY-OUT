@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="style.css"></head>
 <body>
 <canvas id="c"></canvas>
+<button id="repExit" class="hide" type="button">← MATCH LIST</button>
 <div id="hud" class="hide">
   <div id="board" class="pen"><div class="tm" id="n0"></div><div class="dots" id="d0"></div><div class="sc"><b id="s0">0</b>:<b id="s1">0</b></div><div class="dots" id="d1"></div><div class="tm" id="n1"></div></div>
   <div id="role"></div><div id="taker"></div>
@@ -28,10 +29,11 @@
     <button class="big" id="bQuick">Play Online</button>
     <button class="big alt" id="bCreate">Create Room</button>
     <div class="row"><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button class="big alt" id="bJoin">Join Room</button></div>
-    <a class="big alt" id="bFriendly" href="/friendly.html" style="text-decoration:none;display:block">Friendly Match 6v6</a><a class="big alt" href="/competitive.html" style="text-decoration:none;display:block">PRO LEAGUE · RANKED</a><a class="big alt" href="/friendly.html?mode=reporter" style="text-decoration:none;display:block">📺 REPORTER · گزارشگر</a>
+    <a class="big alt" id="bFriendly" href="/friendly.html" style="text-decoration:none;display:block">Friendly Match 6v6</a><a class="big alt" href="/competitive.html" style="text-decoration:none;display:block">PRO LEAGUE · RANKED</a><a class="big alt" href="/friendly.html?mode=reporter" style="text-decoration:none;display:block">📺 6v6 REPORTER · گزارشگر</a><a class="big alt" href="/?mode=reporter" style="text-decoration:none;display:block">🥅 PENALTY REPORTER · گزارشگر</a>
     <div class="row sm"><button id="bSound">Sound: On</button><button id="bFull">Fullscreen</button></div>
     <p id="err"></p>
   </div>
+  <div id="reporter" class="screen hide wide"><h2>📺 PENALTY REPORTER</h2><p class="sub">Choose a live penalty shootout to watch.</p><div id="penRepList"></div><p id="penRepErr" class="sub"></p><a class="back" href="/">← Back</a></div>
   <div id="lobby" class="screen hide">
     <h2>Room <b id="rc"></b></h2><p class="sub">Share this code with your opponent.</p>
     <div id="pl"><div id="p0"></div><div id="p1"></div></div>

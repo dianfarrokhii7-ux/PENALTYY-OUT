@@ -404,7 +404,7 @@ function snap(r) {
 }
 
 /* Reporter / spectator support: a short public description of a running match. */
-const LIVE_PH = ['play', 'dead', 'goal', 'shootout'];
+const LIVE_PH = ['play', 'dead', 'goal']; // 6v6 reporter lists only 6v6 gameplay; shootouts are listed by the penalty reporter
 function liveInfo(r) { return { code: r.code, names: [...r.names], team: [...r.team], score: [...r.score], clock: Math.ceil(r.clock), half: r.half, mode: r.mode || 'friendly', ph: r.ph }; }
 function attach(io, hooks = {}) {
   const ns = io.of('/friendly'), rooms = {}; let queue = null;

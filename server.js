@@ -163,6 +163,19 @@ function resolve(r) {
 
 io.on('connection', socket => {
   const roomForSocket = () => socket.data && rooms[socket.data.code];
+  const penaltyWatchers = code => { const rm = io.sockets.adapter.rooms.get(code); return Math.max(0, (rm ? rm.size : 0) - (rooms[code] ? rooms[code].p.filter(Boolean).length : 0)); };
+  socket.on('spec:list', () => {
+    const list = Object.values(rooms).filter(r => r.p.some(Boolean) && ['idle','aim','flight','result'].includes(r.phase)).map(r => ({ code:r.code, team:[...r.team], names:r.p.map(p => p && p.name || 'Player'), score:[...r.score], kicks:[...r.kicks], log:r.log.map(x => [...x]), turn:r.turn, phase:r.phase, watchers:penaltyWatchers(r.code) }));
+    socket.emit('spec:list', list);
+  });
+  socket.on('spec:watch', d => {
+    const code = String(d && d.code || '').toUpperCase().trim(), r = rooms[code];
+    if (!r || !r.p.some(Boolean) || !['idle','aim','flight','result'].includes(r.phase)) return socket.emit('err', 'This penalty match is not running any more');
+    if (socket.data && socket.data.spec) socket.leave(socket.data.spec);
+    socket.join(code); socket.data = { ...(socket.data || {}), spec:code, reporter:true };
+    socket.emit('spec:start', { ...state(r), names:r.p.map(p => p && p.name || 'Player'), mode:'penalty' });
+  });
+  socket.on('spec:leave', () => { if (socket.data && socket.data.spec) socket.leave(socket.data.spec); if (socket.data) { socket.data.spec = null; socket.data.reporter = false; } });
 
   socket.on('create', d => { const r = mkRoom(); seat(r, socket, 0, d && d.name); });
   socket.on('join', d => {
