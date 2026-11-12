@@ -8,6 +8,7 @@ const DEF_FORM = POF.DEF_FORM, defOrder = () => Array.from({ length: NS }, (_, k
 const lab = f => (f[0] < -.8 ? 'GK' : f[0] < -.3 ? 'DEF' : f[0] > .3 ? 'FWD' : 'MID') + (Math.abs(f[1]) > .3 ? (f[1] < 0 ? ' L' : ' R') : '');
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const sock = io('/friendly');
+const REP = new URLSearchParams(location.search).get('mode') === 'reporter';   // reporter = watch a running match (read-only)
 const LE = LineupEditor.create($('editor'), { onChange: v => sock.emit('lineup', v) });
 const txt = (id, v) => { const e = $(id); if (e._v !== v) { e._v = v; e.textContent = v; } };   // DOM write only when the value changed
 let whoE = null, me = -1, room = null, myTeam = 'BAR', snd = true, lu = { form: DEF_FORM, order: defOrder() }, sel = null, luInit = false, G = null, curLu = null, subSel = -1;
@@ -227,10 +228,10 @@ function camMode() {
 }
 function press(a) {
   if (S && S.rs && S.rs.k === 'penalty' && S.pn && S.rs.t !== me) { if (a === 'shoot' || a === 'pass') { const [sx, sy] = stick(); act('dive', 0, { dir: sx > .3 ? 1 : sx < -.3 ? -1 : 0, hi: sy > .3 }); } return; }
-  if (a === 'pass') act('pass'); else if (a === 'cross') act('cross'); else if (a === 'tk') act('tk'); else if (a === 'dr') act('dr'); else if (a === 'sw') act('sw'); else if (a === 'shoot') startCharge(); else if (a === 'sprint') spBtn = true; }
+  if (a === 'pass') act('pass'); else if (a === 'cross') act('cross'); else if (a === 'tk') act('tk'); else if (a === 'dr') act('dr'); else if (a === 'sw') act('sw'); else if (a === 'shoot') { if (!(S && S.rs && S.rs.k === 'penalty' && S.pn && S.pn[4] > 0)) startCharge(); } else if (a === 'sprint') spBtn = true; }
 function unpress(a) { if (a === 'shoot') release(); else if (a === 'sprint') spBtn = false; }
 const KM = { KeyR: 'dr', KeyI: 'dr', KeyE: 'cross', KeyU: 'cross', KeyF: 'pass', KeyJ: 'pass', Space: 'shoot', KeyK: 'shoot', KeyC: 'tk', KeyL: 'tk', KeyV: 'sw', Tab: 'sw' };
-addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (KM[e.code] || e.code.startsWith('Arrow')) e.preventDefault(); if (e.repeat) return; keys[e.code] = 1; if (e.code === 'KeyB') toggleSubs(); if (KM[e.code]) press(KM[e.code]); });
+addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (REP) { repKey(e); return; } if (KM[e.code] || e.code.startsWith('Arrow')) e.preventDefault(); if (e.repeat) return; keys[e.code] = 1; if (e.code === 'KeyB') toggleSubs(); if (KM[e.code]) press(KM[e.code]); });
 addEventListener('keyup', e => { keys[e.code] = 0; if (KM[e.code]) unpress(KM[e.code]); });
 document.querySelectorAll('#fb button').forEach(b => { const a = b.dataset.a; b.addEventListener('pointerdown', e => { e.preventDefault(); b.classList.add('p'); press(a); }); ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => b.addEventListener(n, e => { e.preventDefault(); if (b.classList.contains('p')) { b.classList.remove('p'); unpress(a); } })); });
 const joyEl = $('joy'), knob = $('knob');
@@ -248,8 +249,8 @@ function sendInput(now, dmv, cm) {
 /* ---------- network ---------- */
 const banner = (t, c) => { const b = $('banner'); b.textContent = t; b.style.color = c || '#f4f0e6'; b.classList.add('show'); clearTimeout(banner.t); banner.t = setTimeout(() => b.classList.remove('show'), 2000); };
 const RS = { kickoff: 'KICK-OFF', throwin: 'THROW-IN', goalkick: 'GOAL KICK', corner: 'CORNER', freekick: 'FREE KICK', penalty: 'PENALTY' };
-sock.on('connect', () => { const s = JSON.parse(sessionStorage.getItem('pof') || 'null'); if (s) sock.emit('rejoin', s); });
-sock.on('err', m => { $('err').textContent = m; if ($('menu').classList.contains('off')) banner(m, '#ffd23f'); });
+sock.on('connect', () => { if (REP) { sock.emit('spec:list'); return; } const s = JSON.parse(sessionStorage.getItem('pof') || 'null'); if (s) sock.emit('rejoin', s); });
+sock.on('err', m => { $('err').textContent = m; if (REP) $('repErr').textContent = m; if ($('menu').classList.contains('off')) banner(m, '#ffd23f'); });
 sock.on('joined', d => { me = d.i; sessionStorage.setItem('pof', JSON.stringify({ code: d.code, token: d.token })); show('lobby'); $('rc').textContent = d.code; });
 /* Day / night: sky, fog, lights, floodlights and pitch brightness. Night is the default look. */
 function applyTime(night) {
@@ -262,7 +263,8 @@ function applyTime(night) {
   const pm = scene.children.find(o => o.geometry && o.geometry.type === 'PlaneGeometry' && o.geometry.parameters.width === 56); if (pm) pm.material.color.setHex(night ? 0x9c9c9c : 0xbcbcbc);
 }
 applyTime(true);
-function show(id) { ['home', 'lobby', 'lineup', 'settings', 'end'].forEach(s => $(s).classList.toggle('hide', s !== id)); }
+function show(id) { ['home', 'lobby', 'lineup', 'settings', 'end', 'rep'].forEach(s => $(s).classList.toggle('hide', s !== id)); }
+if (REP) show('rep');
 sock.on('room', d => {
   room = d; if (me < 0) return;
   [0, 1].forEach(i => { const e = $('p' + i), nm = (d.names && d.names[i]) || (i === me ? 'You' : 'Opponent'); e.textContent = nm + (i === me ? ' (you)' : '') + (d.on[i] ? ' — connected' : ' — waiting…'); e.classList.toggle('on', d.on[i]); });
@@ -296,12 +298,11 @@ sock.on('start', d => {
 });
 sock.on('shootout', d => { sessionStorage.removeItem('pof'); sessionStorage.setItem('po', JSON.stringify({ code: d.code, token: d.token })); location.href = '/'; });   // continue in the penalty-shootout mode
 sock.on('snap', s => {
-  S = s; flip = s.fl; Bl.o = s.b[3]; bt.x = s.b[0]; bt.y = s.b[1]; bt.z = s.b[2];
-  s.p.forEach((p, i) => { const e = ents[i]; if (!e) return; e.tx = p[0]; e.tz = p[1]; e.ta = p[2]; e.st = p[3]; e.red = p[4]; e.sp = p[5]; e.vz = p[7] || 0; });
+  S = s; if (REP) rec(s); if (!rp) applySnap(s); else flip = s.fl;
   txt('s0', s.s[0]); txt('s1', s.s[1]); txt('clk', `${['1st', '2nd', 'ET 1', 'ET 2'][s.h - 1] || '2nd'}  ${Math.floor(s.c / 60)}:${String(s.c % 60).padStart(2, '0')}`);
   const ce = ents[s.k[me]]; if (ce && ce !== whoE) { whoE = ce; $('who').innerHTML = `${esc(ce.name)} #${ce.num} <b>${POF.ovr(ce.q)}</b><small>${statLine(ce.q)}</small>`; } else if (!ce) $('who').textContent = '';
-  subRefresh(s);
-  txt('msg', s.ph === 'dead' && s.rs ? (s.rs.k === 'penalty' ? (s.rs.t === me ? (s.pn && s.pn[0] === 0 ? 'PENALTY — aim with stick / WASD, hold SHOOT, release to kick' : '') : 'PENALTY — you are the goalkeeper: move left/right, press SHOOT to dive toward the stick') : `${RS[s.rs.k]} — ${s.rs.t === me ? 'YOU (pass / shoot)' : 'opponent'}`) : '');
+  if (!REP) subRefresh(s);
+  txt('msg', REP ? repMsg(s) : s.ph === 'dead' && s.rs ? (s.rs.k === 'penalty' ? (s.pn && s.pn[4] > 0 ? 'PENALTY AWARDED — kick in ' + s.pn[4] + ' s' : s.rs.t === me ? (s.pn && s.pn[0] === 0 ? 'PENALTY — aim with stick / WASD, hold SHOOT, release to kick' : '') : 'PENALTY — you are the goalkeeper: move left/right, press SHOOT to dive toward the stick') : `${RS[s.rs.k]} — ${s.rs.t === me ? 'YOU (pass / shoot)' : 'opponent'}`) : '');
   if (chargeT) $('power').firstChild.style.width = clamp((performance.now() - chargeT) / 900, 0, 1) * 100 + '%';
   if (room && room.on) txt('conn', room.on[1 - me] ? '' : 'Opponent disconnected — AI is playing for them');
 });
@@ -311,7 +312,7 @@ sock.on('ev', list => list.forEach(e => {
   else if (e.k === 'save') { beep(200, .25, 'sawtooth', .12); crowd(.22, 700, 2.5); }
   else if (e.k === 'win') beep(240, .1, 'triangle', .12);
   else if (e.k === 'restart') { beep(2400, .25, 'square', .05); if (e.type !== 'kickoff') banner(RS[e.type]); }
-  else if (e.k === 'goal') { startRipple(); celeb = e.t; celebT = 3.2; banner(e.t === me ? 'GOAL!' : 'GOAL FOR OPPONENT', e.t === me ? '#2ecc71' : '#e63946'); [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)); crowd(.45, 1000, 4.5); }
+  else if (e.k === 'goal') { startRipple(); celeb = e.t; celebT = 3.2; banner(REP ? 'GOAL! ' + TEAMS[G.team[e.t]].n : e.t === me ? 'GOAL!' : 'GOAL FOR OPPONENT', REP ? '#ffd23f' : e.t === me ? '#2ecc71' : '#e63946'); if (REP) onGoalRep(); [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, .4, 'triangle'), i * 120)); crowd(.45, 1000, 4.5); }
   else if (e.k === 'foul') { beep(2400, .5, 'square', .06); banner(e.card === 'r' ? 'RED CARD' : e.card === 'y' ? 'YELLOW CARD' : e.pen ? 'FOUL — PENALTY' : 'FOUL', e.card === 'r' ? '#e63946' : '#ffd23f'); crowd(.2, 450, 2.5); }
   else if (e.k === 'penres') { if (e.res !== 'goal') banner(e.res === 'save' ? 'SAVED!' : e.res === 'post' ? 'OFF THE POST!' : 'MISSED!', '#e63946'); }
   else if (e.k === 'dribble') { beep(e.ok ? 660 : 130, e.ok ? .12 : .2, e.ok ? 'triangle' : 'sawtooth', .12); if (e.t === me) banner(e.ok ? 'SKILL MOVE!' : 'HEAVY TOUCH', e.ok ? '#2ecc71' : '#e63946'); }
@@ -322,6 +323,7 @@ sock.on('ev', list => list.forEach(e => {
   else if (e.k === 'post') { beep(1100, .2, 'square', .12); crowd(.2, 900, 1.5); }
   else if (e.k === 'shootout') banner('PENALTY SHOOTOUT', '#ffd23f');
   else if (e.k === 'half') { banner(e.h === 3 ? 'EXTRA TIME' : e.h === 4 ? 'EXTRA TIME — 2ND HALF' : 'HALF TIME', '#ffd23f'); beep(2000, .8, 'square', .06); }
+  else if (e.k === 'end' && REP) repEnd(e);
   else if (e.k === 'end') { $('hud').classList.add('hide'); $('fpad').classList.add('hide'); $('menu').classList.remove('off'); show('end'); sessionStorage.removeItem('pof'); const a = e.score[me], b = e.score[1 - me]; $('endT').textContent = `${a > b ? 'YOU WIN' : a < b ? 'YOU LOSE' : 'DRAW'}  ${a} – ${b}`; $('subs').classList.add('hide'); $('bSubs').classList.add('hide'); showStats(e.st); }
 }));
 
@@ -331,7 +333,7 @@ const fresh = () => { sessionStorage.removeItem('pof'); luInit = false; };
 const mode = new URLSearchParams(location.search).get('mode'); const nm = () => ({ name: POF.name(), mode: ['ranked','league'].includes(mode) ? mode : 'friendly' });
 $('bQuick').onclick = () => { fresh(); sock.emit('quick', nm()); }; $('bCreate').onclick = () => { fresh(); sock.emit('create', nm()); }; $('bJoin').onclick = () => { fresh(); sock.emit('join', { code: $('code').value, ...nm() }); };
 const nameBtn = () => { $('bName').textContent = 'Player: ' + POF.name() + '  ✎'; };
-$('bName').onclick = () => POF.askName(true, nameBtn); POF.askName(false, nameBtn);
+$('bName').onclick = () => POF.askName(true, nameBtn); if (!REP) POF.askName(false, nameBtn);
 $('bReady').onclick = () => { sock.emit('team', myTeam); sock.emit('ready'); $('bReady').disabled = true; };
 $('bSound').onclick = () => { snd = !snd; if (cg) cg.gain.value = snd ? .05 : 0; $('bSound').textContent = 'Sound: ' + (snd ? 'On' : 'Off'); };
 $('bFull').onclick = () => { const d = document.documentElement; document.fullscreenElement ? document.exitFullscreen() : (d.requestFullscreen || d.webkitRequestFullscreen || (() => {})).call(d); };
@@ -355,6 +357,104 @@ function showStats(st) {
   $('endStats').innerHTML = row('Possession %', a.poss, b.poss) + row('Shots', a.shots, b.shots) + row('Passes', a.passes, b.passes) + row('Tackles', a.tackles, b.tackles) + row('Fouls', a.fouls, b.fouls) + row('Dribbles won', `${a.drOk}/${a.dr}`, `${b.drOk}/${b.dr}`);
 }
 
+
+/* ---------- REPORTER: watch a running match, switch camera angles, goal replays ---------- */
+const ANG = ['BROADCAST', 'SIDELINE', 'TOP VIEW', 'BEHIND GOAL', 'BALL CAM', 'PLAYER CAM'];
+const REC = []; let rp = null, lastClip = null, slowOn = true, VS = null, camIdx = 0, camSw = 0, goalSide = 1, rDir = [1, 0], lastB = [0, 0], lastGoalT = 0;
+function applySnap(s) {
+  VS = s; flip = s.fl; Bl.o = s.b[3]; bt.x = s.b[0]; bt.y = s.b[1]; bt.z = s.b[2];
+  s.p.forEach((p, i) => { const e = ents[i]; if (!e) return; e.tx = p[0]; e.tz = p[1]; e.ta = p[2]; e.st = p[3]; e.red = p[4]; e.sp = p[5]; e.vz = p[7] || 0; });
+}
+function applyLerp(a, b, u) {   // smooth in-between frame (needed for slow motion)
+  applySnap(a); bt.x = a.b[0] + (b.b[0] - a.b[0]) * u; bt.y = a.b[1] + (b.b[1] - a.b[1]) * u; bt.z = a.b[2] + (b.b[2] - a.b[2]) * u;
+  a.p.forEach((p, i) => { const e = ents[i], q = b.p[i]; if (e && q) { e.tx = p[0] + (q[0] - p[0]) * u; e.tz = p[1] + (q[1] - p[1]) * u; } });
+}
+function teleport(s) { if (!s) return; applySnap(s); ents.forEach(e => { e.x = e.tx; e.z = e.tz; e.a = e.ta; }); ball.position.set(bt.x, bt.y, bt.z); }
+function rec(s) { const t = performance.now(); REC.push({ t, s }); while (REC.length && REC[0].t < t - 16000) REC.shift(); }
+function clipOf(from, to, goalT) { const f = REC.filter(x => x.t >= from && x.t <= to); return f.length > 8 ? { frames: f, goalT, t0: f[0].t, end: f[f.length - 1].t } : null; }
+const slowWin = c => slowOn && c.goalT ? [c.goalT - 1500, c.goalT + 500] : null;
+function repUI() {
+  $('repTag').classList.toggle('hide', !rp); $('rSkip').classList.toggle('hide', !rp); $('rClose').classList.toggle('hide', !rp);
+  $('rRep').classList.toggle('sel', !!rp); txt('rRep', rp ? '⏪ REPLAYING…' : '⏪ REPLAY (R)');
+}
+function playClip(c) { if (!c || rp || !G) return; celebT = 0; rp = { ...c, tt: c.t0, i: 0, fired: false, slow: slowWin(c) }; teleport(c.frames[0].s); repUI(); }
+function endReplay() { if (!rp) return; rp = null; teleport(S); repUI(); }
+function skipSlow() { if (!rp) return; if (rp.slow && rp.tt < rp.slow[1]) rp.tt = rp.slow[1]; else endReplay(); }   // jump over the slow-motion part, then close
+function toggleSlow() { slowOn = !slowOn; txt('rSlow', 'SLOW-MO: ' + (slowOn ? 'ON' : 'OFF') + ' (M)'); if (rp) rp.slow = slowWin(rp); }
+function stepReplay(dt) {
+  const F = rp.frames, slow = rp.slow && rp.tt >= rp.slow[0] && rp.tt <= rp.slow[1];
+  rp.tt += dt * 1000 * (slow ? .3 : 1);
+  while (rp.i + 1 < F.length - 1 && F[rp.i + 1].t <= rp.tt) rp.i++;
+  const a = F[rp.i], b = F[Math.min(rp.i + 1, F.length - 1)];
+  applyLerp(a.s, b.s, b.t > a.t ? clamp((rp.tt - a.t) / (b.t - a.t), 0, 1) : 0);
+  if (rp.goalT && !rp.fired && rp.tt >= rp.goalT) { rp.fired = true; startRipple(); crowd(.3, 1000, 2.5); }
+  txt('repTag', slow ? '⏪ REPLAY · SLOW-MO' : '⏪ REPLAY'); $('rSkip').classList.toggle('hide', !(rp.slow && rp.tt < rp.slow[1]));
+  if (rp.tt >= rp.end) endReplay();
+}
+function onGoalRep() {   // the goal scene is cut from the recording and played automatically once the celebration calms down
+  const g = lastGoalT = performance.now();
+  setTimeout(() => { const c = clipOf(g - 6500, g + 1500, g); if (c) { lastClip = c; if (!rp) playClip(c); } }, 2300);
+}
+function repMsg(s) {
+  if (s.ph === 'shootout') return 'PENALTY SHOOTOUT — both players moved to the shootout mode';
+  if (s.ph !== 'dead' || !s.rs || !G) return '';
+  const tn = TEAMS[G.team[s.rs.t]].n;
+  return s.rs.k === 'penalty' && s.pn && s.pn[4] > 0 ? `PENALTY for ${tn} — kick in ${s.pn[4]} s` : `${RS[s.rs.k]} — ${tn}`;
+}
+function setAng(i) { camIdx = i; camSw = .9; txt('rAng', `ANGLE ${i + 1}/${ANG.length}: ${ANG[i]} ▸`); document.querySelectorAll('#rAngs button').forEach((b, k) => b.classList.toggle('sel', k === i)); }
+function repCam(bx, bz, dt, T, Lk) {
+  camSw = Math.max(0, camSw - dt); const asp = cam.aspect < 1; let k = 3.5;
+  if (Math.abs(bx) > 8) goalSide = Math.sign(bx);
+  const vx = bx - lastB[0], vz = bz - lastB[1], vn = Math.hypot(vx, vz); lastB = [bx, bz];
+  if (vn > .02) { rDir[0] += (vx / vn - rDir[0]) * Math.min(1, dt * 2); rDir[1] += (vz / vn - rDir[1]) * Math.min(1, dt * 2); const n = Math.hypot(rDir[0], rDir[1]) || 1; rDir[0] /= n; rDir[1] /= n; }
+  if (camIdx === 1) { T.set(clamp(bx * .9, -24, 24), 3.4, W + (asp ? 10 : 7)); Lk.set(bx, .8, bz * .7); k = 4; }
+  else if (camIdx === 2) { const cx = clamp(bx * .6, -14, 14); T.set(cx, asp ? 46 : 34, 7); Lk.set(cx, 0, 0); k = 3; }
+  else if (camIdx === 3) { T.set(goalSide * (L + (asp ? 13 : 9)), asp ? 7 : 5, clamp(bz * .4, -6, 6)); Lk.set(bx, 1, bz); k = 3; }
+  else if (camIdx === 4) { T.set(bx - rDir[0] * 7, 3.6, bz - rDir[1] * 7); Lk.set(bx + rDir[0] * 6, .6, bz + rDir[1] * 6); k = 5; }
+  else if (camIdx === 5) {
+    let e = VS && VS.b[3] >= 0 ? ents[VS.b[3]] : null;
+    if (!e) { let bd = 1e9; ents.forEach(q => { const d = Math.hypot(q.x - bx, q.z - bz); if (d < bd && !q.red) { bd = d; e = q; } }); }
+    if (e) { const fx = Math.cos(e.a), fz = Math.sin(e.a); T.set(e.x - fx * 4.2, 2.3, e.z - fz * 4.2); Lk.set(e.x + fx * 9, 1, e.z + fz * 9); k = 6; } else { T.set(0, 15.5, 21); Lk.set(bx, 0, bz * .5); }
+  } else { const q = Math.max(0, bz); T.set(clamp(bx * .8, -19, 19), (asp ? 22 : 15.5) + q * .25, (asp ? 26 : 21) + q * .9); Lk.set(clamp(bx * .85, -22, 22), 0, bz * .55); }
+  return Math.min(1, dt * (camSw > 0 ? Math.max(k, 9) : k));
+}
+function repKey(e) {
+  if (!G || e.repeat) return; const c = e.code;
+  if (/^Digit[1-6]$/.test(c)) setAng(+c[5] - 1);
+  else if (c === 'KeyC' || c === 'Tab' || c === 'ArrowRight') setAng((camIdx + 1) % ANG.length);
+  else if (c === 'ArrowLeft') setAng((camIdx + ANG.length - 1) % ANG.length);
+  else if (c === 'KeyR') replayBtn();
+  else if (c === 'Space') skipSlow();
+  else if (c === 'Escape') endReplay();
+  else if (c === 'KeyM') toggleSlow();
+  else return; e.preventDefault();
+}
+function replayBtn() { if (rp) return endReplay(); const t = performance.now(); playClip(lastClip || clipOf(t - 8000, t, 0)); }
+function repBack() {   // back to the list of running matches
+  sock.emit('spec:leave'); rp = null; repUI(); G = null; S = null; $('hud').classList.add('hide'); $('repbar').classList.add('hide'); $('menu').classList.remove('off'); show('rep'); sock.emit('spec:list');
+}
+function repEnd(e) {
+  banner(`FULL TIME  ${e.score[0]} – ${e.score[1]}`, '#ffd23f');
+  setTimeout(() => { if (G) repBack(); }, 5000);
+}
+sock.on('spec:list', list => {
+  const box = $('repList'), fmt = m => `${['1st', '2nd', 'ET 1', 'ET 2'][m.half - 1] || '2nd'} ${Math.floor(m.clock / 60)}:${String(m.clock % 60).padStart(2, '0')}`;
+  if (!list.length) { box.innerHTML = '<p class="sub">No match is being played right now. This list refreshes by itself.</p>'; return; }
+  box.innerHTML = list.map(m => `<button data-c="${esc(m.code)}"><b>${esc(TEAMS[m.team[0]].n)} ${m.score[0]} – ${m.score[1]} ${esc(TEAMS[m.team[1]].n)}</b><small>${esc(m.names[0])} vs ${esc(m.names[1])} · ${m.mode === 'ranked' ? 'RANKED' : m.mode === 'league' ? 'PRO LEAGUE' : 'FRIENDLY'} · ${m.ph === 'shootout' ? 'SHOOTOUT' : fmt(m)} · 👁 ${m.watchers}</small></button>`).join('');
+  box.querySelectorAll('button').forEach(b => b.onclick = () => { $('repErr').textContent = ''; sock.emit('spec:watch', { code: b.dataset.c }); });
+});
+sock.on('spec:start', d => {
+  room = { team: d.team, names: d.names }; G = d; S = null; VS = null; REC.length = 0; rp = null; lastClip = null; buildPlayers(d.team, d.lu); applyTime(!d.set || !!d.set.night);
+  $('menu').classList.add('off'); $('hud').classList.remove('hide'); $('fpad').classList.add('hide'); $('bSubs').classList.add('hide'); $('help').classList.add('hide'); $('repbar').classList.remove('hide'); repUI(); setAng(camIdx);
+  [0, 1].forEach(i => { const el = $('n' + i), nm = d.names && d.names[i]; el.textContent = TEAMS[d.team[i]].n; if (nm) { const sm = document.createElement('small'); sm.textContent = nm; el.appendChild(sm); } });
+  crowdStart();
+});
+if (REP) {
+  const row = $('rAngs'); ANG.forEach((n, i) => { const b = document.createElement('button'); b.textContent = i + 1; b.title = n; b.onclick = () => setAng(i); row.appendChild(b); });
+  $('rAng').onclick = () => setAng((camIdx + 1) % ANG.length); $('rRep').onclick = replayBtn; $('rSlow').onclick = toggleSlow; $('rSkip').onclick = skipSlow; $('rClose').onclick = endReplay; $('rExit').onclick = repBack;
+  setInterval(() => { if (!$('rep').classList.contains('hide')) sock.emit('spec:list'); }, 4000);
+}
+
 /* static scenery never moves: skip per-frame matrix updates */
 { const dyn = new Set([ball, bsh, ring, arrow, ...groups]); scene.children.forEach(o => { if (o.isMesh && !dyn.has(o)) { o.updateMatrix(); o.matrixAutoUpdate = false; } }); }
 let shadowsOn = true;
@@ -364,8 +464,9 @@ const tgtV = new THREE.Vector3(), lookV = new THREE.Vector3();   // reused every
 let last = performance.now(), frame = 0;
 function loop(now) {
   requestAnimationFrame(loop); QL.tick(now); const dt = Math.min((now - last) / 1000, .05); last = now; frame++;
-  const dmv = (me === 1 ? -1 : 1) * (flip ? -1 : 1);
-  const cm = camMode(); if (G && S) sendInput(now, dmv, cm);
+  const dmv = REP ? 1 : (me === 1 ? -1 : 1) * (flip ? -1 : 1);
+  if (rp) stepReplay(dt);
+  const cm = REP ? { m: 'b' } : camMode(); if (G && S && !REP) sendInput(now, dmv, cm);
   if (!MOB || frame % 2 === 0) groups.forEach((g, i) => { g.position.y = Math.max(0, Math.sin(now / 1000 * (celebT > 0 ? 9 : 2.2) + i * 1.7)) * (celebT > 0 ? .45 : .06); });
   celebT = Math.max(0, celebT - dt);
   const k = Math.min(1, dt * 14);
@@ -382,7 +483,8 @@ function loop(now) {
   if (ce) { ring.position.x = ce.x; ring.position.z = ce.z; arrow.position.set(ce.x, 2.25 + Math.sin(now / 200) * .08, ce.z); }
   dmCur += (dmv - dmCur) * Math.min(1, dt * 2);
   const bx = ball.position.x, bz = ball.position.z, V = THREE.Vector3; let tgt, look, kk = Math.min(1, dt * 3.5);
-  if (cm.m === 'pk') { tgt = tgtV.set(S.b[0] - cm.d * 5, 2, 0); look = lookV.set(cm.d * L, 1, 0); kk = Math.min(1, dt * 4); }
+  if (REP) { kk = repCam(bx, bz, dt, tgtV, lookV); tgt = tgtV; look = lookV; }
+  else if (cm.m === 'pk') { tgt = tgtV.set(S.b[0] - cm.d * 5, 2, 0); look = lookV.set(cm.d * L, 1, 0); kk = Math.min(1, dt * 4); }
   else if (cm.m === 'pg') { tgt = tgtV.set(cm.d * (L + 4.5), 2.7, 0); look = lookV.set(cm.d * (L - 6), .9, 0); kk = Math.min(1, dt * 4); }
   else if (cm.m === 'fk') { const gx = dmv * L, dx = gx - bx, dz = -bz, n = Math.hypot(dx, dz) || 1; tgt = tgtV.set(bx - dx / n * 5, 2.3, bz - dz / n * 5); look = lookV.set(gx, 1, 0); kk = Math.min(1, dt * 4); }
   else { const q = Math.max(0, bz * dmCur), asp = cam.aspect < 1; tgt = tgtV.set(clamp(bx * .8, -19, 19), (asp ? 22 : 15.5) + q * .25, dmCur * ((asp ? 26 : 21) + q * .9)); look = lookV.set(clamp(bx * .85, -22, 22), 0, bz * .55); }

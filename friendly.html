@@ -9,9 +9,10 @@
 <canvas id="c"></canvas>
 <div id="hud" class="hide">
   <div id="board"><div class="tm" id="n0"></div><div class="sc"><b id="s0">0</b>:<b id="s1">0</b></div><div class="tm" id="n1"></div><div id="clk"></div></div>
-  <div id="cross" class="hide"></div><div id="who"></div><div id="msg"></div><div id="banner"></div>
+  <div id="repTag" class="hide"></div><div id="cross" class="hide"></div><div id="who"></div><div id="msg"></div><div id="banner"></div>
   <button id="bSubs" class="hide">SUBS 5</button>
   <div id="power"><i></i></div><div id="conn"></div>
+  <div id="repbar" class="hide"><div id="rAngs"></div><div><button id="rAng">ANGLE ▸ (C)</button><button id="rRep">⏪ REPLAY (R)</button><button id="rSlow">SLOW-MO: ON (M)</button><button id="rSkip" class="hide">⏩ SKIP SLOW-MO (Space)</button><button id="rClose" class="hide">✕ CLOSE REPLAY (Esc)</button><button id="rExit">EXIT</button></div></div>
   <div id="help">WASD move · Shift sprint · F pass · E cross · Space shoot / header (hold) · R dribble · C tackle · V switch · B subs</div>
 </div>
 <div id="subs" class="hide panel">
@@ -32,8 +33,14 @@
     <button class="big" id="bQuick">Play Online</button>
     <button class="big alt" id="bCreate">Create Room</button>
     <div class="row"><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button class="big alt" id="bJoin">Join Room</button></div>
+    <a class="big alt" href="/friendly.html?mode=reporter" style="text-decoration:none;display:block">📺 REPORTER · گزارشگر</a>
     <div class="row sm"><button id="bSound">Sound: On</button><button id="bFull">Fullscreen</button></div>
     <a class="back" href="/">← Penalty shootout</a><p id="err"></p>
+  </div>
+  <div id="rep" class="screen hide wide">
+    <h2>📺 REPORTER</h2><p class="sub">گزارشگر — pick a running match and watch it. Keys 1–6 / C: camera angle · R: replay · M: slow-mo on/off · Space: skip slow-mo · Esc: close replay.</p>
+    <div id="repList"></div><p class="sub" id="repErr" style="color:var(--red)"></p>
+    <a class="back" href="/friendly.html">← Back</a>
   </div>
   <div id="lobby" class="screen hide">
     <h2>Room <b id="rc"></b></h2><p class="sub">Share this code with your opponent.</p>

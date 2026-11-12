@@ -1,6 +1,7 @@
 // PENALTY OUT — online 6v6 friendly match. Server-authoritative simulation on socket.io namespace /friendly.
 const { SQUADS: SQ, TEAM_KEYS, sanitizeName, FORMS, DEF_FORM } = require('./shared.js');
 const L = 25, W = 15, GW = 2.5, HALF = +process.env.PO_HALF || 150, ET_HALF = +process.env.PO_ET || 60, DT = 1 / 30, BR = .18;   // half lengths in seconds (env overrides are for tests)
+const LONG_D = 13, LONG_P = .2, PEN_WAIT = 5;   // long-range shots (> LONG_D m from the goal line) go in only LONG_P of the time; seconds to wait after a penalty is awarded
 const NS = 6, N = NS * 2, SUBS_MAX = 5, DRIBBLE_P = .4;            // players per team, total players, max substitutions, dribble success chance
 const DEF_ORDER = () => Array.from({ length: NS }, (_, k) => k);
 const TK = TEAM_KEYS;
@@ -34,19 +35,43 @@ function place(r) {
 }
 function kickoff(r, t) { place(r); setRestart(r, 'kickoff', t, 0, 0); }
 function setRestart(r, type, t, x, z) {
-  const B = r.ball, d = dirOf(r, t); B.x = x; B.z = z; B.y = BR; B.vx = B.vz = B.vy = 0; B.o = -1; r.ph = 'dead';
+  const B = r.ball, d = dirOf(r, t); B.x = x; B.z = z; B.y = BR; B.vx = B.vz = B.vy = 0; B.o = -1; r.ph = 'dead'; r.cX = null; r.cT = 0;
   let tk = null, bd = 1e9;
   for (const q of r.P) if (q.t === t && !q.red && (type === 'goalkick' ? q.s === 0 : q.s > 0)) { const dd = hyp(q.x - x, q.z - z); if (dd < bd) { bd = dd; tk = q; } }
   if (!tk) tk = r.P.find(q => q.t === t && !q.red);
   const fx = type === 'throwin' ? 0 : d, fz = type === 'throwin' ? -Math.sign(z) : 0;
   tk.fx = fx; tk.fz = fz; tk.x = x - fx * .8; tk.z = z - fz * .8; tk.vx = tk.vz = 0;
   r.rs = { type, team: t, taker: tk.i, t: 0, x, z }; r.pen = null;
-  if (type === 'penalty') { r.pen = { t, tk: tk.i, gk: (1 - t) * NS, d, sx: x, az: 0, ay: .35, kz: 0, st: 'aim', tt: 0, dive: null }; if (r.on[1 - t]) r.ctrl[1 - t] = (1 - t) * NS; }
+  if (type === 'corner') setupCorner(r, t, z, tk);
+  if (type === 'penalty') { r.pen = { t, tk: tk.i, gk: (1 - t) * NS, d, sx: x, az: 0, ay: .35, kz: 0, st: 'aim', tt: 0, dive: null, wait: PEN_WAIT }; if (r.on[1 - t]) r.ctrl[1 - t] = (1 - t) * NS; }
   if (r.on[t]) r.ctrl[t] = tk.i;
   r.ev.push({ k: 'restart', type, t });
 }
+/* Corner: 3 attackers run into the box to head the cross, 3 defenders mark them. */
+function setupCorner(r, t, z, tk) {
+  const d = dirOf(r, t), gl = d * L, cs = Math.sign(z) || 1;
+  const spots = [[gl - d * 5.2, -cs * 2.2], [gl - d * 6.4, cs * 1.4], [gl - d * 8, -cs * .2]];
+  const near = (a, b) => hyp(a.x - gl, a.z) - hyp(b.x - gl, b.z);
+  const run = r.P.filter(q => q.t === t && q.s > 0 && !q.red && q !== tk).sort(near).slice(0, 3);
+  const def = r.P.filter(q => q.t !== t && q.s > 0 && !q.red).sort(near).slice(0, 3);
+  r.cX = { t, d, run: run.map(q => q.i), def: def.map(q => q.i), spots }; r.cT = 0;
+}
+function cornerMove(r, p) {
+  const cx = r.cX; if (!cx || !(r.ph === 'dead' || r.cT > 0)) return null;
+  const B = r.ball, k = cx.run.indexOf(p.i), m = cx.def.indexOf(p.i), live = r.ph === 'play' && B.o < 0 && hyp(B.x - p.x, B.z - p.z) < 8;
+  if (k >= 0) return live ? aim(p, B.x + B.vx * .3, B.z + B.vz * .3, 7.6) : aim(p, cx.spots[k][0], cx.spots[k][1], 7.2);
+  if (m >= 0) return live ? aim(p, B.x + B.vx * .3, B.z + B.vz * .3, 7) : aim(p, cx.spots[m][0] + cx.d * 1.1, cx.spots[m][1] * .8, 6.6);
+  return null;
+}
+/* A corner runner meets the cross: automatic header at goal. */
+function autoHead(r, p) {
+  const B = r.ball, d = dirOf(r, p.t), az = (rnd() < .5 ? -1 : 1) * (.5 + rnd() * 1.6), pw = .7 + rnd() * .25;
+  const ex = d * L - B.x, ez = az + (rnd() - .5) * .8 - B.z, e = hyp(ex, ez) || 1, sp = 11 + pw * 10;
+  r.st[p.t].shots++; kick(r, p, ex / e * sp, ez / e * sp, .3 + rnd() * .5); r.ev.push({ k: 'head' }); p.st = 4; p.stt = .45;
+}
 function kick(r, p, vx, vz, vy) {
   const B = r.ball; B.o = -1; B.vx = vx; B.vz = vz; B.vy = vy; B.rt = 0; r.shotId = (r.shotId || 0) + 1; r.last = p.t; p.kk = .35; p.st = 2; p.stt = .25;
+  r.cT = r.ph === 'dead' && r.rs && r.rs.type === 'corner' && r.cX ? 3.6 : 0;
   if (r.ph === 'dead') { r.ph = 'play'; r.rs = null; }
   r.ev.push({ k: 'kick' });
 }
@@ -82,8 +107,20 @@ function aerial(r, p, a, i) {
   p.st = 4; p.stt = .45;
 }
 function shoot(r, p, pw, az) {
-  const B = r.ball, gx = dirOf(r, p.t) * L, acc = clamp(1.45 - p.sho * .0095, .55, 1.2), j = (rnd() - .5) * pw * pw * 1.6 * acc, ex = gx - B.x, ez = clamp(az + j, -3.2, 3.2) - B.z, e = hyp(ex, ez) || 1, sp = (13 + pw * 15) * clamp(1 + (p.sho - 75) * .005, .88, 1.12);
+  const B = r.ball, gx = dirOf(r, p.t) * L, acc = clamp(1.45 - p.sho * .0095, .55, 1.2), j = (rnd() - .5) * pw * pw * 1.6 * acc;
+  let tz = clamp(az + j, -3.2, 3.2), lucky = false, sure = false;
+  /* Long-range shots (> LONG_D m from the goal line): only LONG_P (20 %) are allowed to beat the keeper.
+     The rest either go wide or are aimed straight at the keeper (an easy save). */
+  if (Math.abs(gx - B.x) > LONG_D) {
+    lucky = rnd() < LONG_P;
+    if (!lucky && Math.abs(tz) < GW + .4) {
+      if (rnd() < .5) tz = (tz >= 0 ? 1 : -1) * (GW + .7 + rnd() * 1.3);
+      else { const g = r.P[(1 - p.t) * NS]; tz = clamp(g.z + (rnd() - .5) * .8, -GW + .3, GW - .3); sure = true; }
+    }
+  }
+  const ex = gx - B.x, ez = tz - B.z, e = hyp(ex, ez) || 1, sp = (13 + pw * 15) * clamp(1 + (p.sho - 75) * .005, .88, 1.12);
   r.st[p.t].shots++; kick(r, p, ex / e * sp, ez / e * sp, 1.2 + pw * 3.2);
+  r.luckyT = lucky ? 1.8 : 0; r.luckyId = r.shotId; r.sureId = sure ? r.shotId : -1;
 }
 function tackle(r, p) { if (p.tk > 0 || p.st === 1 || p.red || p.stun > 0) return; r.st[p.t].tackles++; p.st = 1; p.stt = .4; p.tk = 1.3; p.hit = false; r.ev.push({ k: 'tackle' }); }
 function foul(r, p, v, behind) {
@@ -105,7 +142,7 @@ function act(r, t, a) {
   const p = r.P[r.ctrl[t]]; if (!p || p.red || !['play', 'dead'].includes(r.ph)) return; const B = r.ball, i = r.inp[t];
   if (r.pen && r.ph === 'dead') {
     const pn = r.pen;
-    if (a.t === 'shoot' && t === pn.t && pn.st === 'aim') penShoot(r, clamp(+a.p || .5, .25, 1));
+    if (a.t === 'shoot' && t === pn.t && pn.st === 'aim' && !(pn.wait > 0)) penShoot(r, clamp(+a.p || .5, .25, 1));
     else if (a.t === 'dive' && t === 1 - pn.t && pn.st === 'fly' && !pn.dive) { const dir = clamp(Math.round(+a.dir || 0), -1, 1); pn.dive = { dz: -pn.d * dir * 2.6, hi: !!a.hi || !dir, at: pn.tt }; }
     return;
   }
@@ -145,6 +182,7 @@ function gk(r, p, d) {
       const sps = hyp(B.vx, B.vz), pz = B.z + B.vz * t, py = Math.max(0, B.y + B.vy * t - 4.9 * t * t);
       if (Math.abs(pz) < GW + 1.3 && py < 2.5) {
         if (p.sid !== r.shotId) { p.sid = r.shotId; p.rtm = (.2 + rnd() * .35) * clamp(1.45 - p.gkr * .0065, .6, 1.2); p.err = (rnd() - .5) * (2.2 + sps * .14) * clamp(1.5 - p.gkr * .008, .4, 1.2); }
+        if (r.sureId === r.shotId) { p.err *= .15; p.rtm = Math.min(p.rtm, .2); }
         if (B.rt > p.rtm) { tz = clamp(pz + p.err, -GW - .7, GW + .7); dive = true; }
       }
     }
@@ -193,6 +231,7 @@ function ai(r, p) {
   const d = dirOf(r, p.t), dead = r.ph === 'dead', rs = r.rs;
   if (dead && rs.taker === p.i) return [0, 0];
   if (p.s === 0) return gk(r, p, d);
+  const cm = cornerMove(r, p); if (cm) return cm;
   if (!r.on[p.t]) return aiFull(r, p);
   return zoneAI(r, p);
 }
@@ -219,14 +258,14 @@ function penResolve(r) {
 }
 function penTick(r) {
   const pn = r.pen, B = r.ball, d = pn.d, def = 1 - pn.t, g = r.P[pn.gk], tk = r.P[pn.tk], sh = r.inp[pn.t], df = r.inp[def];
-  pn.tt += DT; r.rs.t += DT; B.vx = B.vz = B.vy = 0; B.o = -1;
+  pn.tt += DT; r.rs.t += DT; B.vx = B.vz = B.vy = 0; B.o = -1; if (pn.wait > 0) pn.wait = Math.max(0, pn.wait - DT);
   tk.fx = d; tk.fz = 0; tk.x = pn.sx - d; tk.z = 0; tk.vx = tk.vz = 0;
   if (pn.st === 'aim') {
     B.x = pn.sx; B.z = 0; B.y = BR;
     if (r.on[pn.t]) { pn.az = clamp(pn.az + d * sh.mx * 1.6 * DT, -3.6, 3.6); pn.ay = clamp(pn.ay + sh.mz * DT, 0, 1.2); }
     if (r.on[def]) pn.kz = clamp(pn.kz - d * df.mx * 3.5 * DT, -2.6, 2.6);
     g.x = d * (L - .8); g.z += (pn.kz - g.z) * Math.min(1, DT * 8); g.fx = -d; g.fz = 0; g.vx = g.vz = 0;
-    if (pn.tt > (r.on[pn.t] ? 14 : 1.8)) { if (!r.on[pn.t]) { pn.az = (rnd() < .5 ? -1 : 1) * (.8 + rnd() * 1.3); pn.ay = .2 + rnd() * .5; } penShoot(r, r.on[pn.t] ? .55 : .5 + rnd() * .4); }
+    if (pn.tt > PEN_WAIT + (r.on[pn.t] ? 14 : 1.8)) { if (!r.on[pn.t]) { pn.az = (rnd() < .5 ? -1 : 1) * (.8 + rnd() * 1.3); pn.ay = .2 + rnd() * .5; } penShoot(r, r.on[pn.t] ? .55 : .5 + rnd() * .4); }
   } else {
     const s = Math.min(pn.tt / pn.T, 1);
     B.x = pn.sx + d * 6 * s; B.z = pn.tz * s; B.y = BR + (pn.ty - BR) * s + .4 * s * (1 - s);
@@ -262,7 +301,7 @@ function aiFull(r, p) {
   return aim(p, tx, tz, 5.6);
 }
 function end(r, scorer) {
-  r.score[scorer]++; r.ph = 'goal'; r.pt = 3.2; r.ev.push({ k: 'goal', t: scorer, score: [...r.score] }); r.after = () => kickoff(r, 1 - scorer);
+  r.cX = null; r.cT = 0; r.score[scorer]++; r.ph = 'goal'; r.pt = 3.2; r.ev.push({ k: 'goal', t: scorer, score: [...r.score] }); r.after = () => kickoff(r, 1 - scorer);
 }
 function matchStats(r) {
   const tp = (r.st[0].poss + r.st[1].poss) || 1;
@@ -282,9 +321,10 @@ function tick(r) {
       else { r.ph = 'end'; r.ev.push({ k: 'end', score: [...r.score], st: matchStats(r) }); return; }
     }
   }
+  r.luckyT = Math.max(0, (r.luckyT || 0) - DT); if (r.cT > 0 && r.ph === 'play') { r.cT = Math.max(0, r.cT - DT); if (r.cT <= 0) r.cX = null; }
   if (r.ph === 'dead' && r.pen) penTick(r);
   else if (r.ph === 'dead') { r.rs.t += DT; const t = r.rs.team, tk = r.P[r.rs.taker], hum = r.on[t] && r.ctrl[t] === tk.i;
-    if (r.rs.t > (hum ? 9 : 1.6)) { const d = dirOf(r, t), ty = r.rs.type; if (ty === 'penalty' || (ty === 'freekick' && hyp(d * L - B.x, B.z) < 14)) shoot(r, tk, .75, (rnd() < .5 ? -1.7 : 1.7)); else if (ty === 'corner') cross(r, tk, 0, 0); else pass(r, tk, d, (rnd() - .5) * .6); } }
+    if (r.rs.t > (hum ? 9 : r.rs.type === 'corner' ? 3.4 : 1.6)) { const d = dirOf(r, t), ty = r.rs.type; if (ty === 'penalty' || (ty === 'freekick' && hyp(d * L - B.x, B.z) < 14)) shoot(r, tk, .75, (rnd() < .5 ? -1.7 : 1.7)); else if (ty === 'corner') cross(r, tk, 0, 0); else pass(r, tk, d, (rnd() - .5) * .6); } }
   for (let t = 0; t < 2; t++) { let b = -1, bd = 1e9; for (const q of r.P) if (q.t === t && q.s > 0 && !q.red && !(r.on[t] && r.ctrl[t] === q.i)) { const dd = hyp(q.x - B.x, q.z - B.z); if (dd < bd) { bd = dd; b = q.i; } } r.chase[t] = b; }
   for (let t = 0; t < 2; t++) {   // auto-switch to the player closest to a loose / opponent-held ball
     r.swc[t] = Math.max(0, r.swc[t] - DT);
@@ -321,7 +361,7 @@ function tick(r) {
   for (let a = 0; a < N; a++) for (let b = a + 1; b < N; b++) { const p = r.P[a], q = r.P[b]; if (p.red || q.red) continue; const dx = q.x - p.x, dz = q.z - p.z, dd = hyp(dx, dz); if (dd < .7 && dd > .001) { const k = (.7 - dd) / 2 / dd; p.x -= dx * k; p.z -= dz * k; q.x += dx * k; q.z += dz * k; } }
   /* ball */
   if (B.o >= 0) {
-    const p = r.P[B.o]; if (p.red) { B.o = -1; } else { B.x = p.x + p.fx * .7; B.z = p.z + p.fz * .7; B.y = BR; B.vx = p.vx; B.vz = p.vz; B.vy = 0; r.last = p.t; }
+    const p = r.P[B.o]; if (p.red) { B.o = -1; } else { B.x = p.x + p.fx * .7; B.z = p.z + p.fz * .7; if (p.s === 0) B.x = clamp(B.x, -L + .3, L - .3); B.y = BR; B.vx = p.vx; B.vz = p.vz; B.vy = 0; r.last = p.t; }
   } else {
     B.rt += DT; B.px = B.x; B.py = B.y; B.pz = B.z; B.vy -= 9.8 * DT; B.x += B.vx * DT; B.y += B.vy * DT; B.z += B.vz * DT;
     if (B.y < BR) { B.y = BR; B.vy = Math.abs(B.vy) > 1.2 ? -B.vy * .55 : 0; }
@@ -330,9 +370,11 @@ function tick(r) {
     if (r.ph === 'play') {
       for (const p of r.P) {
         if (p.red || p.kk > 0 || p.stun > 0) continue; const gk = p.s === 0, dd = hyp(p.x - B.x, p.z - B.z), sp = hyp(B.vx, B.vz);
+        if (gk && r.luckyT > 0 && r.luckyId === r.shotId) continue;   // a 'lucky' long shot cannot be stopped by the keeper
         if (dd < (gk ? (p.st === 3 ? 1.15 : .95) : .95) && B.y < (gk ? 2.2 : 2.1)) {
           if (gk) { if (rnd() > (sp < 14 ? .92 : sp < 22 ? .5 : .22) + (p.gkr - 75) * .003) { B.vx *= -.3; B.vz += (rnd() - .5) * 7; B.vy = 2; r.last = p.t; p.kk = .4; r.ev.push({ k: 'save' }); break; } }
           else if (sp >= 22) continue;
+          if (!gk && r.cX && r.cT > 0 && p.t === r.cX.t && B.y >= .45) { autoHead(r, p); break; }   // corner: runner heads it at goal
           if (!gk && B.y >= .9) { p.st = 4; p.stt = .4; r.ev.push({ k: 'head' }); }
           B.o = p.i; B.vx = B.vz = 0; r.last = p.t; p.hold = 1.2; if (gk) r.ev.push({ k: 'save' }); if (r.on[p.t] && p.s) r.ctrl[p.t] = p.i; break;
         }
@@ -357,10 +399,13 @@ function outCheck(r) {
 }
 function snap(r) {
   const B = r.ball;
-  return { c: Math.ceil(r.clock), h: r.half, s: r.score, ph: r.ph, rs: r.rs ? { k: r.rs.type, t: r.rs.team, tk: r.rs.taker } : null, pn: r.pen ? [r.pen.st === 'aim' ? 0 : 1, rd(r.pen.az), rd(r.pen.ay), r.pen.d] : null, fl: r.flip ? 1 : 0,
+  return { c: Math.ceil(r.clock), h: r.half, s: r.score, ph: r.ph, rs: r.rs ? { k: r.rs.type, t: r.rs.team, tk: r.rs.taker } : null, pn: r.pen ? [r.pen.st === 'aim' ? 0 : 1, rd(r.pen.az), rd(r.pen.ay), r.pen.d, Math.ceil(r.pen.wait || 0)] : null, fl: r.flip ? 1 : 0,
     b: [rd(B.x), rd(B.y), rd(B.z), B.o], p: r.P.map(p => [rd(p.x), rd(p.z), rd(Math.atan2(p.fz, p.fx)), p.st, p.red ? 1 : 0, rd(hyp(p.vx, p.vz)), p.y, rd(p.vz)]), k: r.ctrl, sb: r.subs };
 }
 
+/* Reporter / spectator support: a short public description of a running match. */
+const LIVE_PH = ['play', 'dead', 'goal', 'shootout'];
+function liveInfo(r) { return { code: r.code, names: [...r.names], team: [...r.team], score: [...r.score], clock: Math.ceil(r.clock), half: r.half, mode: r.mode || 'friendly', ph: r.ph }; }
 function attach(io, hooks = {}) {
   const ns = io.of('/friendly'), rooms = {}; let queue = null;
   const tok = () => Math.random().toString(36).slice(2, 12), R = s => s.data && rooms[s.data.c];
@@ -411,6 +456,17 @@ function attach(io, hooks = {}) {
       const pl = r.P[i * NS + slot]; if (!pl || pl.red) return;
       lu.order[slot] = bn; r.subs[i]++; pl.y = 0; applyRatings(r); r.ev.push({ k: 'sub', t: i, slot, idx: bn });
     });
+    /* ---- reporter: any visitor can pick a running match and watch it (read-only) ---- */
+    const watchers = c => { const rm = ns.adapter.rooms.get(c), r = rooms[c]; return Math.max(0, (rm ? rm.size : 0) - (r ? r.on.filter(Boolean).length : 0)); };
+    s.on('spec:list', () => { if (!ok(s, 6)) return; s.emit('spec:list', Object.values(rooms).filter(r => r.P.length && LIVE_PH.includes(r.ph)).map(r => ({ ...liveInfo(r), watchers: watchers(r.code) }))); });
+    s.on('spec:watch', d => {
+      if (!ok(s, 6)) return; const c = String((d && d.code) || '').toUpperCase().trim(), r = rooms[c];
+      if (!r || !r.P.length || !LIVE_PH.includes(r.ph)) return s.emit('err', 'This match is not running any more');
+      if (s.data.spec) s.leave(s.data.spec);
+      s.join(c); s.data.spec = c;
+      s.emit('spec:start', { code: c, team: r.team, lu: r.lu, set: r.set, names: r.names, mode: r.mode || 'friendly' });
+    });
+    s.on('spec:leave', () => { if (s.data && s.data.spec) { s.leave(s.data.spec); s.data.spec = null; } });
     s.on('disconnect', () => {
       const r = R(s); if (!r || r.sk[s.data.i] !== s.id) return; r.on[s.data.i] = false; ns.to(r.code).emit('room', pub(r));
       setTimeout(() => { if (!r.on[0] && !r.on[1]) delete rooms[r.code]; }, 60000);
@@ -430,4 +486,4 @@ function attach(io, hooks = {}) {
     }
   }, 1000 * DT);
 }
-module.exports = { attach, mk, start, tick, snap, FORMS, setRestart, act, NS, N };
+module.exports = { attach, mk, start, tick, snap, FORMS, setRestart, act, shoot, NS, N, liveList: r => liveInfo(r) };

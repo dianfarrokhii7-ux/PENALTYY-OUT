@@ -75,3 +75,14 @@ h4{margin:6px 0 2px;text-align:left;font-size:15px;opacity:.8;letter-spacing:.08
 .seg{display:flex;gap:6px}.seg button{min-width:78px;font-size:16px;padding:8px 10px;opacity:.7}
 .seg button.sel{background:var(--gold);color:#111;border-color:var(--gold);opacity:1}
 .seg button:disabled.sel{opacity:1}.seg button:disabled{cursor:default}
+
+/* ---- v9: reporter (spectator) ---- */
+#repbar{position:absolute;left:0;right:0;bottom:calc(10px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none}
+#repbar>div{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;pointer-events:auto}
+#repbar button{font-size:14px;padding:7px 10px;font-weight:700;background:rgba(6,18,12,.8)}
+#repbar button.sel{background:var(--gold);color:#111;border-color:var(--gold)}
+#rAngs button{min-width:38px;padding:7px 0}
+#repTag{position:absolute;top:calc(var(--bh) + 40px + env(safe-area-inset-top));width:100%;text-align:center;font-size:26px;font-weight:700;color:var(--gold);letter-spacing:.12em;text-shadow:0 2px 8px #000}
+#repList{display:flex;flex-direction:column;gap:8px}
+#repList button{display:flex;flex-direction:column;gap:2px;text-align:left;font-size:18px}
+#repList small{font-size:12px;opacity:.75;font-weight:500}

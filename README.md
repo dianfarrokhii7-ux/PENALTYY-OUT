@@ -66,3 +66,10 @@ After both players are connected **and** have confirmed their line-ups, the host
 - Ranked uses an Elo-style rating (starting at 1000); Pro League awards 3/1/0 points.
 - Completed competitive 6v6 match results are saved in `competitive-data.json` on the server.
 - The page refreshes leaderboards every 15 seconds.
+
+## v9 additions
+- **📺 Reporter / گزارشگر** (`/friendly.html?mode=reporter`, linked from the home page and the friendly menu): pick any running match (friendly, ranked, pro league) from a live list and watch it read-only. Six camera angles (keys `1`–`6`, `C`/arrows or the on-screen buttons): Broadcast, Sideline, Top view, Behind goal, Ball cam, Player cam. Every goal is replayed automatically with a slow-motion segment; `R` replays on demand, `M` turns slow-motion on/off, `Space` skips the slow-motion part, `Esc` closes the replay. Server: `spec:list` / `spec:watch` / `spec:leave`.
+- **Long shots**: from more than 13 m away only 20 % of shots can beat the keeper; the rest go wide or straight at him (`LONG_D`, `LONG_P` in `friendly.js`).
+- **Corners**: 3 attackers run into the box and head the cross at goal, 3 defenders mark them.
+- **Penalties in a match**: 5 s wait after the penalty is announced (HUD countdown) before the kick is allowed (`PEN_WAIT`).
+- Fix: a keeper holding the ball can no longer carry it over his own goal line.
