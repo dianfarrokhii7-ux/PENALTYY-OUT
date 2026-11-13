@@ -9,3 +9,16 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL            # AUREX accounts, teams and results live here
+        fromDatabase:
+          name: penalty-out-db
+          property: connectionString
+      - key: AUREX_OWNER_KEY         # set by hand in the Render dashboard (never commit it)
+        sync: false
+databases:
+  - name: penalty-out-db
+    databaseName: penalty_out
+    user: penalty_out
+    plan: free

@@ -73,3 +73,7 @@ After both players are connected **and** have confirmed their line-ups, the host
 - **Corners**: 3 attackers run into the box and head the cross at goal, 3 defenders mark them.
 - **Penalties in a match**: 5 s wait after the penalty is announced (HUD countdown) before the kick is allowed (`PEN_WAIT`).
 - Fix: a keeper holding the ball can no longer carry it over his own goal line.
+
+
+## AUREX CHAMPIONSHIP
+Accounts, team registration with owner approval and an owner panel, backed by PostgreSQL. See [docs/AUREX.md](docs/AUREX.md) for Render setup (`DATABASE_URL`, `AUREX_OWNER_KEY`) and the security model.

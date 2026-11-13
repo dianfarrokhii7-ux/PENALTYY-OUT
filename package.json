@@ -1,12 +1,12 @@
 {
   "name": "penalty-out",
-  "version": "8.0.0",
-  "description": "PENALTY OUT - online 3D penalty + 6v6 friendly + Pro League & Ranked",
+  "version": "9.0.0",
+  "description": "PENALTY OUT - online 3D penalty + 6v6 friendly + Pro League & Ranked + AUREX Championship",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check competitive.js && node --check friendly.js && node --check shared.js && node --check lineup.js && node --check gamepad.js && node --check game.js && node --check friendly-game.js",
-    "test": "npm run check && node test/squads.js && node test/lineup.js && node test/sim.js && node test/features.js && node test/dribble.js && node test/settings.js && node test/integration.js && node test/shootout.js",
+    "check": "node --check server.js && node --check competitive.js && node --check friendly.js && node --check shared.js && node --check lineup.js && node --check gamepad.js && node --check game.js && node --check friendly-game.js && node --check aurex-ui.js && for f in aurex/*.js; do node --check $f || exit 1; done",
+    "test": "npm run check && node test/squads.js && node test/lineup.js && node test/sim.js && node test/features.js && node test/dribble.js && node test/settings.js && node test/integration.js && node test/shootout.js && node test/aurex.js",
     "lint": "npx eslint ."
   },
   "engines": {
@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "express": "^4.19.2",
+    "pg": "^8.11.5",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {

@@ -14,7 +14,7 @@ const io = new Server(srv, {
 });
 app.disable('x-powered-by');
 // Only the client files are public — server-side sources (server.js, friendly.js, package.json…) are never served.
-const PUBLIC = new Set(['competitive.html','competitive.css','competitive.js','index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js', 'lineup.js', 'gamepad.js', 'scoreboard.png']);
+const PUBLIC = new Set(['competitive.html','competitive.css','competitive.js','index.html', 'friendly.html', 'style.css', 'friendly.css', 'game.js', 'friendly-game.js', 'shared.js', 'lineup.js', 'gamepad.js', 'scoreboard.png', 'aurex-ui.css', 'aurex-ui.js', 'aurex-logo.png', 'aurex-logo-sm.png']);
 
 const COMP_FILE = path.join(__dirname, 'competitive-data.json');
 let compData = { players: {} };
@@ -38,6 +38,9 @@ app.get('/api/competitive', (req,res) => {
  const league=all.slice().sort((a,b)=>b.leaguePoints-a.leaguePoints||((b.gf-b.ga)-(a.gf-a.ga))).map(x=>({name:x.name,played:x.leaguePlayed,wins:x.leagueWins,draws:x.leagueDraws,losses:x.leagueLosses,gf:x.gf,ga:x.ga,points:x.leaguePoints}));
  res.json({player:p,ranked,league});
 });
+
+// AUREX CHAMPIONSHIP: accounts, teams, owner panel (PostgreSQL-backed). See docs/AUREX.md
+require('./aurex').mount(app);
 
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: Object.keys(rooms).length, uptime: Math.round(process.uptime()) }));
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
