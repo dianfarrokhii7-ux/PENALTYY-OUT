@@ -98,3 +98,21 @@ dialog.dlg::backdrop{background:rgba(2,5,14,.72)}
 .mb4{margin-bottom:4px}.mb6{margin-bottom:6px}.mb16{margin-bottom:16px}.mb18{margin-bottom:18px}
 .my14{margin:14px 0}.m18-4{margin:18px 0 4px}.m8-16{margin:8px 0 16px}.m8-18{margin:8px 0 18px}
 .w150{max-width:150px}.w480{max-width:480px}.title-xl{font-size:clamp(30px,5vw,44px)}
+
+/* AUREX football club selection — additive styles; existing PENALTY OUT and AUREX theme untouched */
+.club-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:18px}
+.club-card{text-align:center;padding:20px 16px;min-width:0}
+.club-card.club-own{border-color:rgba(0,229,255,.75);box-shadow:0 0 22px rgba(45,107,255,.16)}
+.club-crest{width:82px;height:82px;border-radius:50%;margin:0 auto;display:grid;place-items:center;font:800 24px var(--head);letter-spacing:.04em;color:#fff;background:linear-gradient(135deg,var(--club-a),var(--club-b));border:2px solid rgba(203,211,225,.8);box-shadow:0 8px 26px rgba(0,0,0,.25)}
+.club-roster{text-align:left;margin-top:14px;border-top:1px solid var(--line);padding-top:10px;color:var(--silver)}
+.club-roster summary{cursor:pointer;color:var(--blue2);font-weight:600}
+.club-roster ol,.club-roster ul{margin:8px 0 0;padding-left:22px}
+.club-roster li{padding:2px 0}
+.club-admin-list{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.club-admin-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px;border:1px solid var(--line);border-radius:8px;background:rgba(4,9,22,.35)}
+.club-admin-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:260px}
+.club-admin-actions select{min-width:180px}
+@media(max-width:900px){.club-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.club-grid{grid-template-columns:1fr}.club-admin-row{align-items:flex-start;flex-direction:column}.club-admin-actions{width:100%;min-width:0}.club-admin-actions select{flex:1;min-width:0}}
+
+.club-barcelona{--club-a:#A50044;--club-b:#004D98}.club-realmadrid{--club-a:#fff;--club-b:#00529F;color:#0a1931}.club-psg{--club-a:#004170;--club-b:#DA291C}.club-atletico{--club-a:#CB3524;--club-b:#fff;color:#0a1931}

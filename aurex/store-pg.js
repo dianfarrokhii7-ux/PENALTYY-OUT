@@ -31,7 +31,61 @@ function create(url, env = process.env) {
 
   return {
     kind: 'postgres',
-    async migrate() { await q(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8')); },
+    async migrate() {
+      await q(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+      const clubs = [
+        ['barcelona','FC Barcelona','BAR',['#A50044','#004D98'],[],[],'penalty_out_existing'],
+        ['realmadrid','Real Madrid','RMA',['#FFFFFF','#00529F'],[],[],'penalty_out_existing'],
+        ['psg','Paris Saint-Germain','PSG',['#004170','#DA291C'],[
+          {name:'Matvey Safonov',pos:'GK'},{name:'Achraf Hakimi',pos:'DF'},{name:'Marquinhos',pos:'DF'},
+          {name:'João Neves',pos:'MF'},{name:'Vitinha',pos:'MF'},{name:'Ferran Torres',pos:'FW'},{name:'Ousmane Dembélé',pos:'FW'}
+        ],[{name:'Khvicha Kvaratskhelia',pos:'FW'},{name:'Désiré Doué',pos:'FW'}],'aurex'],
+        ['atletico','Atlético Madrid','ATM',['#CB3524','#FFFFFF'],[
+          {name:'Jan Oblak',pos:'GK'},{name:'Cristian Romero',pos:'DF'},{name:'Alex Grimaldo',pos:'DF'},
+          {name:'Koke',pos:'MF'},{name:'Johnny Cardoso',pos:'MF'},{name:'Julián Álvarez',pos:'FW'},{name:'Alexander Sørloth',pos:'FW'}
+        ],[{name:'Jonathan David',pos:'FW'},{name:'Miguel Cubo',pos:'MF'}],'aurex']
+      ];
+      for (const c of clubs) await q(`INSERT INTO football_clubs(id,name,short,colors,starting_xi,substitutes,source)
+        VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7)
+        ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,short=EXCLUDED.short,colors=EXCLUDED.colors,
+        starting_xi=EXCLUDED.starting_xi,substitutes=EXCLUDED.substitutes,source=EXCLUDED.source`,
+        [c[0],c[1],c[2],JSON.stringify(c[3]),JSON.stringify(c[4]),JSON.stringify(c[5]),c[6]]);
+    },
+    async listFootballClubs() {
+      const r=await q(`SELECT c.id,c.name,c.short,c.colors,c.starting_xi,c.substitutes,c.source,
+        s.aurex_team_id,s.selected_by,s.selected_at,t.name AS aurex_team_name,t.team_code
+        FROM football_clubs c LEFT JOIN aurex_club_selection s ON s.football_club_id=c.id
+        LEFT JOIN teams t ON t.id=s.aurex_team_id ORDER BY CASE c.id WHEN 'barcelona' THEN 1 WHEN 'realmadrid' THEN 2 WHEN 'psg' THEN 3 ELSE 4 END`);
+      return r.rows.map(x=>({id:x.id,name:x.name,short:x.short,colors:x.colors,startingXI:x.starting_xi,substitutes:x.substitutes,
+        source:x.source,selectedByTeamId:x.aurex_team_id,selectedByTeamName:x.aurex_team_name,teamCode:x.team_code,selectedAt:x.selected_at}));
+    },
+    async getClubSelection(teamId) {
+      const r=await q(`SELECT c.id,c.name,c.short,c.colors,c.starting_xi,c.substitutes,c.source,s.selected_by,s.selected_at
+        FROM aurex_club_selection s JOIN football_clubs c ON c.id=s.football_club_id WHERE s.aurex_team_id=$1`,[teamId]);
+      const x=r.rows[0];return x?{id:x.id,name:x.name,short:x.short,colors:x.colors,startingXI:x.starting_xi,substitutes:x.substitutes,source:x.source,selectedBy:x.selected_by,selectedAt:x.selected_at}:null;
+    },
+    async selectFootballClub(teamId,clubId,userId) {
+      const c=await pool.connect();
+      try {
+        await c.query('BEGIN');
+        const t=await c.query('SELECT id,status,captain_id FROM teams WHERE id=$1 FOR UPDATE',[teamId]);
+        if(!t.rowCount) {await c.query('ROLLBACK');return {kind:'NO_TEAM'};}
+        const status=t.rows[0].status;
+        if(!['approved','active','suspended'].includes(status)){await c.query('ROLLBACK');return {kind:'BAD_STATUS',status};}
+        if(t.rows[0].captain_id!==userId){await c.query('ROLLBACK');return {kind:'NOT_CAPTAIN'};}
+        if(status==='suspended'){
+          const own=await c.query('SELECT football_club_id FROM aurex_club_selection WHERE aurex_team_id=$1',[teamId]);
+          await c.query('ROLLBACK');return own.rows[0]&&own.rows[0].football_club_id===clubId?{kind:'UNCHANGED'}:{kind:'SUSPENDED'};
+        }
+        const taken=await c.query('SELECT aurex_team_id FROM aurex_club_selection WHERE football_club_id=$1 FOR UPDATE',[clubId]);
+        if(taken.rowCount&&taken.rows[0].aurex_team_id!==teamId){await c.query('ROLLBACK');return {kind:'TAKEN'};}
+        await c.query(`INSERT INTO aurex_club_selection(aurex_team_id,football_club_id,selected_by) VALUES($1,$2,$3)
+          ON CONFLICT(aurex_team_id) DO UPDATE SET football_club_id=EXCLUDED.football_club_id,selected_by=EXCLUDED.selected_by,selected_at=now()`,[teamId,clubId,userId]);
+        await c.query('COMMIT');return {kind:'OK'};
+      }catch(e){await c.query('ROLLBACK').catch(()=>{});if(e.code==='23505')return {kind:'TAKEN'};throw e;}finally{c.release();}
+    },
+    async releaseFootballClub(teamId) { await q('DELETE FROM aurex_club_selection WHERE aurex_team_id=$1',[teamId]); },
+    async close() { await pool.end(); },
     async close() { await pool.end(); },
     // users
     async createUser({ username, passHash, recoveryHash }) {

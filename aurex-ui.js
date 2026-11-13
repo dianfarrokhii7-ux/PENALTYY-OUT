@@ -136,7 +136,7 @@ function shell(active, ...content) {
   app.replaceChildren(
     h('header', { class: 'top' },
       h('a', { class: 'brand', href: '#/team' }, h('img', { src: 'aurex-logo-sm.png', alt: '' }), 'AUREX'),
-      h('nav', { class: 'nav', 'aria-label': 'Main' }, link('#/team', 'My team', 'team'), link('#/teams', 'Teams', 'teams'), S.me && S.me.role === 'OWNER' ? link('#/admin', 'Owner panel', 'admin') : null, link('#/account', 'Account', 'account')),
+      h('nav', { class: 'nav', 'aria-label': 'Main' }, link('#/team', 'My team', 'team'), link('#/teams', 'Teams', 'teams'), link('#/clubs', 'Football club', 'clubs'), S.me && S.me.role === 'OWNER' ? link('#/admin', 'Owner panel', 'admin') : null, link('#/account', 'Account', 'account')),
       h('div', { class: 'who' }, h('span', { class: 'name' }, S.me.username + (S.me.role === 'OWNER' ? ' · Owner' : '')), h('button', { class: 'btn sm', onclick: signOut }, 'Sign out'))),
     h('main', { class: 'page' }, content));
 }
@@ -182,6 +182,40 @@ function viewTeam() {
       h('section', { class: 'panel' }, h('h3', null, 'Coming with match phase'), h('p', { class: 'muted small mt6' }, 'These need the match engine and league tables, which are built next. They are not available yet.'),
         h('div', { class: 'locked' }, ['Line-up (7)', 'Next match', 'League table', 'Results', 'Team stats', 'Player stats', 'Training', 'Match history', 'Trophy cabinet'].map(x => h('span', null, x))))));
 }
+async function viewClubs() {
+  shell('clubs', h('h2', null, 'AUREX Football Club Selection'), h('p', {class:'muted mt8'}, 'One football club belongs to one AUREX team. Only the captain of an approved team can select.'));
+  try {
+    const data=await api('GET','/football-clubs'), clubs=data.clubs||[], mine=data.mine;
+    const myClub=mine&&mine.club?mine.club.id:null, myTeam=mine&&mine.teamId;
+    const cards=clubs.map(c=>{
+      const own=myClub===c.id, taken=!!c.selectedByTeamId&&!own;
+      const card=h('section',{class:'panel club-card'+(own?' club-own':'')},
+        h('div',{class:'club-crest club-'+c.id},c.short),
+        h('h3',{class:'mt10'},c.name),
+        h('span',{class:'chip '+(own?'active':taken?'suspended':'approved')},own?'YOUR CLUB':taken?'UNAVAILABLE':'AVAILABLE'),
+        taken?h('p',{class:'muted small mt8'},`Selected by ${c.selectedByTeamName||'another AUREX team'} · ${c.teamCode||''}`):h('p',{class:'muted small mt8'},c.source==='penalty_out_existing'?'Uses the existing PENALTY OUT squad.':'AUREX roster: 7 starters + 2 substitutes.'),
+        own?h('button',{class:'btn sm',disabled:true},'Selected ✓'):taken?h('button',{class:'btn sm',disabled:true},'Already selected'):h('button',{class:'btn primary mt12',disabled:!S.team||S.team.captainId!==S.me.id||!['approved','active'].includes(S.team.status),onclick:()=>run(api('POST','/select-club',{footballClubId:c.id}),'Football club selected',()=>viewClubs())},'Select this club'));
+      if(c.source!=='penalty_out_existing'){
+        card.append(h('details',{class:'club-roster'},h('summary',null,'View squad'),h('div',{class:'small muted mt8'},'Starting XI'),h('ol',null,(c.startingXI||[]).map(p=>h('li',null,p.name+' · '+p.pos))),h('div',{class:'small muted mt8'},'Substitutes'),h('ul',null,(c.substitutes||[]).map(p=>h('li',null,p.name+' · '+p.pos)))));
+      }
+      return card;
+    });
+    const notice=!S.team?h('div',{class:'banner warn mt16'},'Register or join an AUREX team first.'):S.team.status==='pending'?h('div',{class:'banner warn mt16'},'Your team is awaiting OWNER approval.'):S.team.captainId!==S.me.id?h('div',{class:'banner warn mt16'},'Only your team captain can select the football club.'):null;
+    shell('clubs',h('div',{class:'row spread mb16'},h('div',null,h('h2',null,'AUREX Football Club Selection'),h('p',{class:'muted mt8'},'Choose one club for your AUREX team.')),myClub?h('span',{class:'chip active'},'Selected: '+myClub):null),notice,h('div',{class:'club-grid'},cards),h('p',{class:'muted small mt16'},'Barcelona and Real Madrid reuse the squads already present in PENALTY OUT.'));
+  }catch(e){shell('clubs',h('h2',null,'Football club selection'),h('div',{class:'banner bad mt16'},e.message));}
+}
+async function adminClubs(body) {
+  const [{clubs},{teams}]=await Promise.all([api('GET','/admin/football-clubs'),api('GET','/admin/teams')]);
+  const eligible=teams.filter(t=>['approved','active','suspended'].includes(t.status));
+  body.replaceChildren(h('div',{class:'panel'},h('h3',null,'Football club reservations'),h('p',{class:'muted small mt8'},'Manage club selections. Suspended teams retain their selection.'),
+    h('div',{class:'club-admin-list'},clubs.map(c=>{
+      const select=h('select',{class:'mt8','aria-label':'Select AUREX team'},h('option',{value:''},'Choose AUREX team'),eligible.map(t=>h('option',{value:t.id},`${t.teamCode||'No ID'} · ${t.name} (${t.status})`)));
+      const current=c.selectedByTeamId;
+      return h('div',{class:'club-admin-row'},h('div',{class:'grow'},h('b',null,c.name),h('div',{class:'muted small'},current?`Reserved by ${c.selectedByTeamName} (${c.teamCode||current})`:'Available')),
+        h('div',{class:'club-admin-actions'},select,h('button',{class:'btn sm',onclick:()=>{if(!select.value)return toast('Choose a team first',true);run(api('POST',`/admin/teams/${select.value}/football-club`,{footballClubId:c.id}),'Club assigned',()=>adminClubs(body));}},'Assign'),
+        current?h('button',{class:'btn sm danger',onclick:()=>run(api('DELETE',`/admin/teams/${current}/football-club`),'Selection released',()=>adminClubs(body))},'Release'):null));
+    }))));
+}
 async function viewTeams() {
   shell('teams', h('h2', null, 'Teams in the championship'), h('p', { class: 'muted' }, 'Loading…'));
   try {
@@ -210,7 +244,7 @@ async function viewAdmin(sub) {
   if (!S.me || S.me.role !== 'OWNER') return shell('admin', h('div', { class: 'banner bad' }, 'This area is for the tournament owner.'));
   ADMIN.tab = sub || 'teams';
   const tab = (key, label, off) => h('button', { class: 'tab', role: 'tab', disabled: !!off, title: off ? 'Arrives with the match phase' : null, 'aria-selected': String(ADMIN.tab === key), onclick: () => go('#/admin' + (key === 'teams' ? '' : '/' + key)) }, label);
-  const tabs = h('div', { class: 'tabs', role: 'tablist' }, tab('teams', 'Teams'), tab('players', 'Players'), tab('audit', 'Activity log'), tab('m', 'Matches', true), tab('s', 'Seasons', true), tab('t', 'Tournament', true));
+  const tabs = h('div', { class: 'tabs', role: 'tablist' }, tab('teams', 'Teams'), tab('players', 'Players'), tab('clubs', 'Club selection'), tab('audit', 'Activity log'), tab('m', 'Matches', true), tab('s', 'Seasons', true), tab('t', 'Tournament', true));
   const body = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
   shell('admin', h('h2', null, 'Owner panel'), tabs, body);
   try {
@@ -273,6 +307,7 @@ function render() {
   if (!S.me) return viewAuth(r === 'register' ? 'register' : 'login');
   if (r === '' || r === 'team') return viewTeam();
   if (r === 'teams') return viewTeams();
+  if (r === 'clubs') return viewClubs();
   if (r === 'account') return viewAccount();
   if (r === 'owner-setup') return viewOwnerSetup();
   if (r === 'admin') return viewAdmin(path[1]);

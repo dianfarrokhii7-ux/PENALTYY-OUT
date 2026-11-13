@@ -51,6 +51,10 @@ function createApi({ store, env = process.env }) {
     const l = await core.teamLogo(c.user, +c.params.id); if (!l) throw err(404, 'NOT_FOUND', 'No logo.');
     return { raw: l.data, type: l.mime };
   });
+  // --- football club selection
+  R('GET', '/football-clubs', { auth: 'optional' }, async c => ({ json: { clubs: await core.footballClubs(), mine: c.user ? await core.myFootballClub(c.user) : null } }));
+  R('POST', '/select-club', { auth: true }, async c => ({ json: await core.selectFootballClub(c.user, c.body.footballClubId) }));
+  R('GET', '/my-club', { auth: true }, async c => ({ json: { mine: await core.myFootballClub(c.user) } }));
   // --- owner panel (every route re-checks the OWNER role on the server)
   const A = { auth: true, owner: true };
   R('GET', '/admin/teams', A, async c => ({ json: { teams: await core.admin.listTeams(c.user, c.query.get('status')) } }));
@@ -65,6 +69,9 @@ function createApi({ store, env = process.env }) {
   R('POST', `/admin/players/${ID}/suspend`, A, async c => ({ json: { player: await core.admin.setPlayerStatus(c.user, +c.params.id, 'suspended', c.body) } }));
   R('POST', `/admin/players/${ID}/unsuspend`, A, async c => ({ json: { player: await core.admin.setPlayerStatus(c.user, +c.params.id, 'active', c.body) } }));
   R('POST', `/admin/players/${ID}/role`, A, async c => ({ json: { player: await core.admin.setRole(c.user, +c.params.id, c.body) } }));
+  R('GET', '/admin/football-clubs', A, async c => ({ json: { clubs: await core.admin.listFootballClubs(c.user) } }));
+  R('POST', `/admin/teams/${ID}/football-club`, A, async c => ({ json: await core.admin.selectFootballClub(c.user, +c.params.id, c.body) }));
+  R('DELETE', `/admin/teams/${ID}/football-club`, A, async c => ({ json: await core.admin.releaseFootballClub(c.user, +c.params.id) }));
   R('GET', '/admin/audit', A, async c => ({ json: { entries: await core.admin.listAudit(c.user) } }));
 
   async function handler(req, res) {

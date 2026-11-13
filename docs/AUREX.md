@@ -35,3 +35,14 @@ To run the same checks against a real, throw-away PostgreSQL database (it TRUNCA
 
 ## Not built yet (next phases)
 League formats (4/6/8 teams), schedule, results, standings, seasons, awards, archive, statistics, referee reports and MVP storage; the 7-vs-7 two-player-per-team match engine with 30-minute clock, AI referee/VAR; cinematics; training.
+
+## Phase 2 – Football club selection (added in expanded update)
+- AUREX navigation now includes **Football club** (`#/clubs`).
+- PostgreSQL migrations create `football_clubs` and `aurex_club_selection` idempotently and seed Barcelona, Real Madrid, PSG and Atlético Madrid.
+- Barcelona and Real Madrid are marked `penalty_out_existing`; their PENALTY OUT squad is not duplicated. PSG and Atlético include 7 starters + 2 substitutes in the club catalog.
+- `GET /api/aurex/football-clubs` lists availability and selection owner; `GET /api/aurex/my-club` returns the signed-in user's team's selection; `POST /api/aurex/select-club` lets an approved/active captain select a club.
+- OWNER panel includes a Club selection tab, assignment and release actions. All selection writes are PostgreSQL transactions and the club is unique across AUREX teams. Suspended teams keep their pick and cannot change it.
+- Final team deletion must call `store.releaseFootballClub(teamId)`; rejection/re-registration policy should be wired if a final-delete endpoint is added. No team-delete endpoint existed in Phase 1.
+
+## Remaining phases
+League formats/scheduling/results/standings, match engine integration (7v7 controlled by two actual users), match clock/added time, AI referee/VAR, cinematic intro/halftime/fulltime, training, full lineup/substitutions, analysis/MVP, season awards and historical archive are not implemented by this selection update. They require separate implementation and testing; existing PENALTY OUT main menu, penalty and friendly game files were left unchanged.

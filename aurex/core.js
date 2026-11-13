@@ -154,6 +154,30 @@ function createCore({ store, env = process.env }) {
     return teamView(await store.updateTeam(t.id, { captainId: target.userId }), { secret: true });
   }
 
+  // ---------- AUREX football club selection ----------
+  async function footballClubs() {
+    const rows = await store.listFootballClubs();
+    return rows.map(c => ({ ...c, status: c.selectedByTeamId ? 'Selected' : 'Available' }));
+  }
+  async function selectFootballClub(user, clubId) {
+    if (!['barcelona','realmadrid','psg','atletico'].includes(clubId)) throw err(400,'INVALID_CLUB','Choose one of the available football clubs.');
+    const team = await store.getActiveTeamForUser(user.id);
+    if (!team || !['approved','active','suspended'].includes(team.status)) throw err(403,'TEAM_NOT_READY','Your AUREX team must be approved before selecting a football club.');
+    if (team.captainId !== user.id) throw err(403,'NOT_CAPTAIN','Only your team captain can select the football club.');
+    const result = await store.selectFootballClub(team.id,clubId,user.id);
+    if (result.kind==='TAKEN') throw err(409,'CLUB_TAKEN','This football club is already selected by another AUREX team.');
+    if (result.kind==='NOT_CAPTAIN') throw err(403,'NOT_CAPTAIN','Only your team captain can select the football club.');
+    if (result.kind==='BAD_STATUS') throw err(403,'TEAM_NOT_READY','Your team is not eligible to select a football club.');
+    if (result.kind==='SUSPENDED') throw err(403,'TEAM_SUSPENDED','A suspended team cannot change its football club.');
+    if (result.kind==='NO_TEAM') throw err(404,'NO_TEAM','AUREX team not found.');
+    await audit(user,'club.select','team',team.id,{footballClubId:clubId});
+    return {ok:true,clubId,selection:await store.getClubSelection(team.id)};
+  }
+  async function myFootballClub(user) {
+    const team=await store.getActiveTeamForUser(user.id);
+    return team?{teamId:team.id,club:await store.getClubSelection(team.id)}:null;
+  }
+
   // ---------- owner panel ----------
   async function mustTeam(id) { const t = await store.getTeamById(id); if (!t) throw err(404, 'TEAM_NOT_FOUND', 'Team not found.'); return t; }
   const bad = (t, what) => err(409, 'BAD_STATE', `Cannot ${what}: team is ${t.status}.`);
@@ -230,9 +254,25 @@ function createCore({ store, env = process.env }) {
       await audit(actor, 'player.role', 'user', id, { from: u.role, to: b.role });
       return publicUser(out);
     },
+    async listFootballClubs(actor) { assertOwner(actor); return store.listFootballClubs(); },
+    async selectFootballClub(actor, id, b) {
+      assertOwner(actor); const t=await mustTeam(id);
+      if(!['approved','active','suspended'].includes(t.status)) throw bad(t,'select a football club for');
+      if(!['barcelona','realmadrid','psg','atletico'].includes(b.footballClubId)) throw err(400,'INVALID_CLUB','Choose one of the four clubs.');
+      const r=await store.selectFootballClub(t.id,b.footballClubId,t.captainId);
+      if(r.kind==='TAKEN') throw err(409,'CLUB_TAKEN','This club is already selected by another team.');
+      if(r.kind==='SUSPENDED') throw err(403,'TEAM_SUSPENDED','A suspended team cannot change its selection.');
+      if(r.kind!=='OK'&&r.kind!=='UNCHANGED') throw err(409,'SELECTION_FAILED','Could not update the selection.');
+      await audit(actor,'club.owner_select','team',id,{footballClubId:b.footballClubId});
+      return {ok:true,selection:await store.getClubSelection(id)};
+    },
+    async releaseFootballClub(actor,id) {
+      assertOwner(actor); await mustTeam(id); await store.releaseFootballClub(id);
+      await audit(actor,'club.release','team',id); return {ok:true};
+    },
     async listAudit(actor) { assertOwner(actor); return store.listAudit(150); },
   };
 
-  return { authenticate, register, login, logout, me, changePassword, recover, bootstrapOwner, registerTeam, publicTeams, teamLogo, setCaptainByTeam, admin, limiter, purge: () => store.purgeExpiredSessions() };
+  return { authenticate, register, login, logout, me, changePassword, recover, bootstrapOwner, registerTeam, publicTeams, teamLogo, setCaptainByTeam, footballClubs, selectFootballClub, myFootballClub, admin, limiter, purge: () => store.purgeExpiredSessions() };
 }
 module.exports = { createCore, publicUser, teamView };

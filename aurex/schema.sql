@@ -57,3 +57,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
   detail JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+
+-- AUREX football club selection (Phase 2, PostgreSQL-native; safe/idempotent)
+CREATE TABLE IF NOT EXISTS football_clubs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  short TEXT NOT NULL,
+  colors JSONB NOT NULL DEFAULT '[]'::jsonb,
+  starting_xi JSONB NOT NULL DEFAULT '[]'::jsonb,
+  substitutes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  source TEXT NOT NULL DEFAULT 'aurex'
+);
+CREATE TABLE IF NOT EXISTS aurex_club_selection (
+  aurex_team_id INTEGER PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+  football_club_id TEXT NOT NULL UNIQUE REFERENCES football_clubs(id),
+  selected_by INTEGER REFERENCES users(id),
+  selected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
