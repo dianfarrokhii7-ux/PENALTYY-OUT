@@ -136,7 +136,7 @@ function shell(active, ...content) {
   app.replaceChildren(
     h('header', { class: 'top' },
       h('a', { class: 'brand', href: '#/team' }, h('img', { src: 'aurex-logo-sm.png', alt: '' }), 'AUREX'),
-      h('nav', { class: 'nav', 'aria-label': 'Main' }, link('#/team', 'My team', 'team'), link('#/teams', 'Teams', 'teams'), link('#/clubs', 'Football club', 'clubs'), S.me && S.me.role === 'OWNER' ? link('#/admin', 'Owner panel', 'admin') : null, link('#/account', 'Account', 'account')),
+      h('nav', { class: 'nav', 'aria-label': 'Main' }, link('#/team', 'My team', 'team'), link('#/teams', 'Teams', 'teams'), link('#/clubs', 'Football club', 'clubs'), h('a', { href: '/training.html' }, 'Training'), S.me && S.me.role === 'OWNER' ? link('#/admin', 'Owner panel', 'admin') : null, link('#/account', 'Account', 'account')),
       h('div', { class: 'who' }, h('span', { class: 'name' }, S.me.username + (S.me.role === 'OWNER' ? ' · Owner' : '')), h('button', { class: 'btn sm', onclick: signOut }, 'Sign out'))),
     h('main', { class: 'page' }, content));
 }
