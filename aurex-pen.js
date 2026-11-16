@@ -1,7 +1,12 @@
 /* AUREX PENALTY CUP – client: lobby, controls, HUD, VAR overlay, sound. The server decides everything; this file only sends intents. */
 (function () {
 'use strict';
-const $ = id => document.getElementById(id), P = window.AurexPenPhysics, C = P.C, Gfx = window.PenGfx;
+const $ = id => document.getElementById(id);
+const fatal = msg => { const m = $('menu'); m.classList.remove('off'); ['scrBoot', 'scrHome', 'scrQueue', 'scrLobby', 'scrEnd'].forEach(x => $(x).classList.toggle('hide', x !== 'scrBoot')); $('bootMsg').textContent = msg; $('bootLink').hidden = false; $('bootLink').textContent = 'Back to AUREX'; };
+if (!window.THREE) { fatal('The 3D engine could not be loaded (three.js from cdnjs). Check your connection or ad-blocker and reload.'); return; }
+if (!window.AurexPenPhysics || !window.PenGfx) { fatal('A game file failed to load. Reload the page (Ctrl+F5). If it keeps happening, tell the owner.'); return; }
+if (!window.io) { fatal('Could not reach the game server connection (socket.io). Reload the page.'); return; }
+const P = window.AurexPenPhysics, C = P.C, Gfx = window.PenGfx;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 let sock = null, off = 0, me = -1, room = null, players = [], league = false, phase = 'menu', turn = null, role = 'none', st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: 0 }, cards = [0, 0];
 let aim = { ax: 0, ay: 0.4, curve: 0 }, charging = false, chargeT0 = 0, power = 0, sent = false, ballAll = [], strikeAt = 0, shotClockTimer = null, timers = [], lastKin = '0,0', runInfo = null, started = false, sbReady = false, myTeam = null;
@@ -146,15 +151,21 @@ function applyScore(d) { if (d.kicks) { st = { kicks: d.kicks, goals: d.goals, l
 function onMatchStart(d) {
   started = true; league = d.league; players = d.players; phase = 'intro';
   st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: d.first }; $('menu').classList.add('off'); show('hud', true); show('pad', false); Snd.unlock(); Snd.ambience();
-  initGfx(); Gfx.setActors(players); Gfx.setClock(srv); renderBoard(); text('role', ''); text('hint', ''); show('runbar', false); show('power', false); show('curveui', false);
+  try { initGfx(); Gfx.setActors(players); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('leave'); return; }
+  Gfx.setClock(srv); renderBoard(); text('role', ''); text('hint', ''); show('runbar', false); show('power', false); show('curveui', false);
   Gfx.startIntro(srv(), d.introMs); Gfx.crowdCheer(true); Snd.roar(true);
   players.forEach((p, i) => { text('itn' + i, p.team.name); text('ipn' + i, p.username); $('icr' + i).src = crest(p.team); });
   const it = $('intro'); it.className = ''; show('intro', true); const first = players[d.first];
   text('coin', `COIN TOSS · ${first.team.name.toUpperCase()} KICKS FIRST`); const nIn = Math.min(2600, d.introMs * 0.28), tOut = d.introMs * 0.66;
   later(nIn, () => it.classList.add('names-in')); later(tOut, () => { it.classList.add('names-out'); it.classList.add('title-in'); show('hud', false); Snd.roar(false); }); later(d.introMs - 200, () => { $('fade').classList.add('on'); }); later(d.introMs + 150, () => { show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); });
 }
-function initGfx() { if (sbReady) return; sbReady = true; Gfx.init($('gl')); requestAnimationFrame(loop); }
-function loop() { Gfx.render(); tickClock(); inputFrame(); requestAnimationFrame(loop); }
+function initGfx() {
+  if (sbReady) return; sbReady = true;
+  try { Gfx.init($('gl')); } catch (e) { console.error(e); sbReady = false; throw e; }
+  requestAnimationFrame(loop);
+}
+function safeLoop() { try { Gfx.render(); } catch (e) { if (!safeLoop.warned) { safeLoop.warned = true; console.error('render error', e); text('conn', 'Graphics error: ' + e.message); } } }
+function loop() { safeLoop(); tickClock(); inputFrame(); requestAnimationFrame(loop); }
 
 function onSync(d) {
   started = true; me = d.you; league = d.league; players = d.room.players.filter(Boolean); st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first }; cards = d.cards || [0, 0];

@@ -22,6 +22,7 @@ function mount(app, env = process.env) {
   const asset = (route, file, type) => app.get(route, (_req, res) => { res.type(type).set({ 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' }); res.sendFile(path.join(__dirname, '..', file)); });
   asset('/aurex-pen.js', 'aurex-pen.js', 'application/javascript'); asset('/aurex-pen.css', 'aurex-pen.css', 'text/css');
   asset('/aurex-scoreboard.webp', 'aurex-scoreboard.webp', 'image/webp');
+  asset('/aurex-pen-3d.js', 'aurex-pen-3d.js', 'application/javascript');
   asset('/aurex-pen-physics.js', 'aurex/pen-physics.js', 'application/javascript');
 
   const store = createStore(env);
