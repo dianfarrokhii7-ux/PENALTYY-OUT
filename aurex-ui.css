@@ -116,3 +116,6 @@ dialog.dlg::backdrop{background:rgba(2,5,14,.72)}
 @media(max-width:520px){.club-grid{grid-template-columns:1fr}.club-admin-row{align-items:flex-start;flex-direction:column}.club-admin-actions{width:100%;min-width:0}.club-admin-actions select{flex:1;min-width:0}}
 
 .club-barcelona{--club-a:#A50044;--club-b:#004D98}.club-realmadrid{--club-a:#fff;--club-b:#00529F;color:#0a1931}.club-psg{--club-a:#004170;--club-b:#DA291C}.club-atletico{--club-a:#CB3524;--club-b:#fff;color:#0a1931}
+/* penalty cup */
+.chip.W{color:var(--good);border-color:rgba(65,224,160,.55)}.chip.D{color:var(--warn);border-color:rgba(255,200,87,.5)}.chip.L{color:var(--bad);border-color:rgba(255,107,134,.55)}
+.chip+.chip{margin-left:4px}.btn.disabled{opacity:.45;pointer-events:none}

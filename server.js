@@ -40,7 +40,7 @@ app.get('/api/competitive', (req,res) => {
 });
 
 // AUREX CHAMPIONSHIP: accounts, teams, owner panel (PostgreSQL-backed). See docs/AUREX.md
-require('./aurex').mount(app);
+const aurexMount = require('./aurex').mount(app);
 
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: Object.keys(rooms).length, uptime: Math.round(process.uptime()) }));
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
@@ -254,6 +254,8 @@ io.on('connection', socket => {
   });
 });
 
+// AUREX penalty cup duels (own Socket.IO namespace /aurex-pen; only exists when AUREX is configured)
+if (aurexMount) require('./aurex/pen-room').attach(io, aurexMount);
 const port = process.env.PORT || 3000;
 require('./friendly').attach(io, { shootout: shootoutRoom, onFinish: r => { if (r.mode && !r.compSaved) { rankRecord(r.names, r.score, r.mode); r.compSaved = true; } } });
 srv.listen(port, () => console.log('PENALTY OUT on port ' + port));

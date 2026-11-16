@@ -4,7 +4,7 @@ const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 const dupErr = code => Object.assign(new Error(code), { code });
 
 function create() {
-  const S = { users: [], sessions: new Map(), teams: [], members: [], audit: [], owner: false, seq: 0, uid: 0, tid: 0, aid: 0 };
+  const S = { users: [], sessions: new Map(), teams: [], members: [], audit: [], owner: false, seq: 0, uid: 0, tid: 0, aid: 0, penLeague: { startedAt: null, startedBy: null }, penMatches: [] };
   const userOut = u => (u ? { id: u.id, username: u.username, role: u.role, status: u.status, createdAt: u.createdAt, passHash: u.passHash, recoveryHash: u.recoveryHash } : null);
   const memberRows = tid => S.members.filter(m => m.teamId === tid).sort((a, b) => a.slot - b.slot)
     .map(m => ({ userId: m.userId, username: S.users.find(u => u.id === m.userId).username, slot: m.slot }));
@@ -81,6 +81,22 @@ function create() {
     async releaseMembers(teamId) { S.members.filter(m => m.teamId === teamId).forEach(m => { m.active = false; }); },
     async nextTeamNumber() { return ++S.seq; },
     async getLogo(teamId) { const t = S.teams.find(x => x.id === teamId); return t && t.logo ? { mime: t.logo.mime, data: Buffer.from(t.logo.data) } : null; },
+    // ---- AUREX penalty cup
+    async getPenLeague() { return { started: !!S.penLeague.startedAt, startedAt: S.penLeague.startedAt, startedBy: S.penLeague.startedBy }; },
+    async startPenLeague(userId) {
+      if (S.penLeague.startedAt) return { kind: 'ALREADY', startedAt: S.penLeague.startedAt };
+      S.penLeague = { startedAt: new Date().toISOString(), startedBy: userId }; return { kind: 'OK', startedAt: S.penLeague.startedAt };
+    },
+    async recordPenMatch(m) {
+      if (S.penMatches.some(x => x.id === m.id)) return { kind: 'DUP' };
+      S.penMatches.push({ ...clone(m), finishedAt: m.finishedAt || new Date().toISOString() }); return { kind: 'OK' };
+    },
+    async listPenMatches({ leagueOnly = false, limit = 50 } = {}) {
+      const nm = id => { const t = S.teams.find(x => x.id === id); return t ? t.name : '?'; }, un = id => { const u = S.users.find(x => x.id === id); return u ? u.username : '?'; };
+      return S.penMatches.filter(m => !leagueOnly || m.league).slice().sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)) || String(b.id).localeCompare(String(a.id))).slice(0, limit)
+        .map(m => ({ ...clone(m), teamAName: nm(m.teamA), teamBName: nm(m.teamB), playerAName: un(m.playerA), playerBName: un(m.playerB) }));
+    },
+    async allLeaguePenMatches() { return S.penMatches.filter(m => m.league).map(clone); },
     // audit
     async addAudit({ actorId, action, targetType, targetId, detail }) {
       S.audit.push({ id: ++S.aid, actorId, action, targetType: targetType || null, targetId: targetId == null ? null : String(targetId), detail: clone(detail) || null, createdAt: new Date().toISOString() });

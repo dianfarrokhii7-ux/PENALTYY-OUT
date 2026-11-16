@@ -15,6 +15,15 @@ function mount(app, env = process.env) {
   const sendPage = file => (_req, res) => { res.set({ 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'Cache-Control': 'no-cache' }); res.sendFile(path.join(__dirname, '..', file)); };
   app.get(['/aurex', '/aurex.html'], sendPage('aurex.html'));
 
+  // Penalty cup match page: own CSP (three.js from cdnjs, websocket to this host). Everything else about AUREX keeps the strict CSP above.
+  const PEN_CSP = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+  const sendPen = (file, type) => (_req, res) => { res.set({ 'Content-Security-Policy': PEN_CSP, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'Cache-Control': 'no-cache' }); if (type) res.type(type); res.sendFile(path.join(__dirname, '..', file)); };
+  app.get(['/aurex-pen', '/aurex-pen.html'], sendPen('aurex-pen.html'));
+  const asset = (route, file, type) => app.get(route, (_req, res) => { res.type(type).set({ 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' }); res.sendFile(path.join(__dirname, '..', file)); });
+  asset('/aurex-pen.js', 'aurex-pen.js', 'application/javascript'); asset('/aurex-pen.css', 'aurex-pen.css', 'text/css');
+  asset('/aurex-scoreboard.webp', 'aurex-scoreboard.webp', 'image/webp');
+  asset('/aurex-pen-physics.js', 'aurex/pen-physics.js', 'application/javascript');
+
   const store = createStore(env);
   if (!store) {
     console.error('[aurex] DISABLED: set DATABASE_URL (Render PostgreSQL) to enable AUREX CHAMPIONSHIP.');

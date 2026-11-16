@@ -75,3 +75,30 @@ CREATE TABLE IF NOT EXISTS aurex_club_selection (
   selected_by INTEGER REFERENCES users(id),
   selected_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- AUREX PENALTY CUP (additive only: new tables, nothing existing is altered or dropped)
+CREATE TABLE IF NOT EXISTS aurex_pen_league (
+  id SMALLINT PRIMARY KEY CHECK (id = 1),
+  started_at TIMESTAMPTZ,
+  started_by INTEGER REFERENCES users(id)
+);
+INSERT INTO aurex_pen_league(id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS aurex_pen_matches (
+  id TEXT PRIMARY KEY,                       -- match id: a result can be stored only once
+  team_a INTEGER NOT NULL REFERENCES teams(id),
+  team_b INTEGER NOT NULL REFERENCES teams(id),
+  player_a INTEGER REFERENCES users(id),
+  player_b INTEGER REFERENCES users(id),
+  goals_a SMALLINT NOT NULL,
+  goals_b SMALLINT NOT NULL,
+  kicks_a SMALLINT NOT NULL DEFAULT 0,
+  kicks_b SMALLINT NOT NULL DEFAULT 0,
+  result TEXT NOT NULL CHECK (result IN ('A','B','DRAW')),
+  reason TEXT NOT NULL,
+  league BOOLEAN NOT NULL DEFAULT FALSE,     -- false = friendly (played before the owner started the league)
+  var_count SMALLINT NOT NULL DEFAULT 0,
+  detail JSONB,
+  finished_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (team_a <> team_b)
+);
+CREATE INDEX IF NOT EXISTS aurex_pen_matches_league_idx ON aurex_pen_matches(league, finished_at);

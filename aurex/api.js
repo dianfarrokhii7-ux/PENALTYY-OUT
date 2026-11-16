@@ -55,6 +55,8 @@ function createApi({ store, env = process.env }) {
   R('GET', '/football-clubs', { auth: 'optional' }, async c => ({ json: { clubs: await core.footballClubs(), mine: c.user ? await core.myFootballClub(c.user) : null } }));
   R('POST', '/select-club', { auth: true }, async c => ({ json: await core.selectFootballClub(c.user, c.body.footballClubId) }));
   R('GET', '/my-club', { auth: true }, async c => ({ json: { mine: await core.myFootballClub(c.user) } }));
+  // --- penalty cup (public table; the owner starts the league)
+  R('GET', '/pen/cup', {}, async () => ({ json: await core.penCup() }));
   // --- owner panel (every route re-checks the OWNER role on the server)
   const A = { auth: true, owner: true };
   R('GET', '/admin/teams', A, async c => ({ json: { teams: await core.admin.listTeams(c.user, c.query.get('status')) } }));
@@ -72,6 +74,7 @@ function createApi({ store, env = process.env }) {
   R('GET', '/admin/football-clubs', A, async c => ({ json: { clubs: await core.admin.listFootballClubs(c.user) } }));
   R('POST', `/admin/teams/${ID}/football-club`, A, async c => ({ json: await core.admin.selectFootballClub(c.user, +c.params.id, c.body) }));
   R('DELETE', `/admin/teams/${ID}/football-club`, A, async c => ({ json: await core.admin.releaseFootballClub(c.user, +c.params.id) }));
+  R('POST', '/admin/pen/league/start', A, async c => ({ json: await core.admin.startPenLeague(c.user) }));
   R('GET', '/admin/audit', A, async c => ({ json: { entries: await core.admin.listAudit(c.user) } }));
 
   async function handler(req, res) {

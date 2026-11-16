@@ -136,7 +136,7 @@ function shell(active, ...content) {
   app.replaceChildren(
     h('header', { class: 'top' },
       h('a', { class: 'brand', href: '#/team' }, h('img', { src: 'aurex-logo-sm.png', alt: '' }), 'AUREX'),
-      h('nav', { class: 'nav', 'aria-label': 'Main' }, link('#/team', 'My team', 'team'), link('#/teams', 'Teams', 'teams'), link('#/clubs', 'Football club', 'clubs'), S.me && S.me.role === 'OWNER' ? link('#/admin', 'Owner panel', 'admin') : null, link('#/account', 'Account', 'account')),
+      h('nav', { class: 'nav', 'aria-label': 'Main' }, link('#/team', 'My team', 'team'), link('#/teams', 'Teams', 'teams'), link('#/clubs', 'Football club', 'clubs'), link('#/cup', 'Penalty cup', 'cup'), S.me && S.me.role === 'OWNER' ? link('#/admin', 'Owner panel', 'admin') : null, link('#/account', 'Account', 'account')),
       h('div', { class: 'who' }, h('span', { class: 'name' }, S.me.username + (S.me.role === 'OWNER' ? ' · Owner' : '')), h('button', { class: 'btn sm', onclick: signOut }, 'Sign out'))),
     h('main', { class: 'page' }, content));
 }
@@ -244,12 +244,13 @@ async function viewAdmin(sub) {
   if (!S.me || S.me.role !== 'OWNER') return shell('admin', h('div', { class: 'banner bad' }, 'This area is for the tournament owner.'));
   ADMIN.tab = sub || 'teams';
   const tab = (key, label, off) => h('button', { class: 'tab', role: 'tab', disabled: !!off, title: off ? 'Arrives with the match phase' : null, 'aria-selected': String(ADMIN.tab === key), onclick: () => go('#/admin' + (key === 'teams' ? '' : '/' + key)) }, label);
-  const tabs = h('div', { class: 'tabs', role: 'tablist' }, tab('teams', 'Teams'), tab('players', 'Players'), tab('clubs', 'Club selection'), tab('audit', 'Activity log'), tab('m', 'Matches', true), tab('s', 'Seasons', true), tab('t', 'Tournament', true));
+  const tabs = h('div', { class: 'tabs', role: 'tablist' }, tab('teams', 'Teams'), tab('players', 'Players'), tab('clubs', 'Club selection'), tab('league', 'Penalty league'), tab('audit', 'Activity log'), tab('m', 'Matches', true), tab('s', 'Seasons', true), tab('t', 'Tournament', true));
   const body = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
   shell('admin', h('h2', null, 'Owner panel'), tabs, body);
   try {
     if (ADMIN.tab === 'teams') await adminTeams(body);
     else if (ADMIN.tab === 'players') await adminPlayers(body);
+    else if (ADMIN.tab === 'league') await adminLeague(body);
     else await adminAudit(body);
   } catch (e) { body.replaceChildren(h('div', { class: 'banner bad' }, e.message)); }
 }
@@ -297,6 +298,60 @@ async function adminAudit(body) {
     h('tbody', null, entries.map(e => h('tr', null, h('td', null, new Date(e.createdAt).toLocaleString()), h('td', null, e.actor || '–'), h('td', null, e.action), h('td', null, e.targetType ? `${e.targetType} #${e.targetId}` : '–'), h('td', { class: 'muted small' }, e.detail ? JSON.stringify(e.detail) : ''))))) : h('p', { class: 'muted' }, 'Nothing logged yet.')));
 }
 
+
+// ---------- penalty cup: table, results, play button (the match itself lives on /aurex-pen) ----------
+let cupTimer = null;
+const RES_LABEL = { normal: '', sudden_death: 'sudden death', cap_draw: 'draw after 10 kicks each', forfeit: 'forfeit' };
+function cupTable(rows, started) {
+  const cols = ['#', 'Team', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts', 'Form'];
+  return h('div', { class: 'panel scroll' }, h('table', { class: 'tbl' },
+    h('thead', null, h('tr', null, cols.map(c => h('th', null, c)))),
+    h('tbody', null, rows.map(r => h('tr', null,
+      h('td', null, started || r.played ? r.rank : '–'),
+      h('td', null, h('div', { class: 'row' }, crest(r, true), h('b', null, r.name))),
+      ...[r.played, r.won, r.drawn, r.lost, r.gf, r.ga, (r.gd > 0 ? '+' : '') + r.gd].map(v => h('td', null, v)),
+      h('td', null, h('b', null, r.points)),
+      h('td', null, (r.form || []).map(f => h('span', { class: 'chip ' + f }, f))))))));
+}
+function cupResults(list) {
+  if (!list.length) return h('p', { class: 'muted' }, 'No penalty matches have been played yet.');
+  return h('div', { class: 'panel scroll' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, ['When', 'Match', 'Score', 'Type', 'Note'].map(x => h('th', null, x)))),
+    h('tbody', null, list.map(m => h('tr', null,
+      h('td', null, new Date(m.finishedAt).toLocaleString()),
+      h('td', null, `${m.teamA} (${m.playerA}) vs ${m.teamB} (${m.playerB})`),
+      h('td', null, h('b', null, `${m.goalsA} – ${m.goalsB}`)),
+      h('td', null, h('span', { class: 'chip ' + (m.league ? 'W' : 'D') }, m.league ? 'League' : 'Friendly')),
+      h('td', { class: 'muted' }, [RES_LABEL[m.reason] || '', m.varCount ? `VAR ×${m.varCount}` : ''].filter(Boolean).join(' · ') || '–'))))));
+}
+async function viewCup() {
+  const body = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
+  shell('cup', h('h2', null, 'AUREX Penalty Cup'), body);
+  clearInterval(cupTimer);
+  const load = async () => {
+    const d = await api('GET', '/pen/cup'), my = S.team && S.team.status === 'active';
+    body.replaceChildren(
+      d.league.started
+        ? h('div', { class: 'banner good mb14' }, 'The league is LIVE. Every match started from now on counts in the table: win 3 · draw 1 · loss 0.')
+        : h('div', { class: 'banner warn mb14' }, 'The league has not started yet. Matches are friendlies and do not count in the table. The owner starts the league from the owner panel.'),
+      h('section', { class: 'panel mb14' }, h('h3', { class: 'mb6' }, 'Play a penalty duel'),
+        h('p', { class: 'muted mb14' }, 'Two players from two different teams. One shoots, one keeps goal, then you swap. Five kicks each, sudden death if level, a draw if it is still level after ten kicks each. An AI referee and VAR watch every kick.'),
+        h('div', { class: 'row' }, h('a', { class: 'btn primary' + (my ? '' : ' disabled'), href: my ? '/aurex-pen' : null, 'aria-disabled': my ? null : 'true' }, 'Play now'), my ? null : h('span', { class: 'muted' }, 'Your team must be active to play.'))),
+      h('h3', { class: 'mt14 mb6' }, 'Table'), cupTable(d.standings, d.league.started),
+      h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent));
+  };
+  try { await load(); } catch (e) { body.replaceChildren(h('div', { class: 'banner bad' }, e.message)); return; }
+  cupTimer = setInterval(() => { if (location.hash.replace(/^#\/?/, '').split('/')[0] !== 'cup') return clearInterval(cupTimer); load().catch(() => { }); }, 15000);
+}
+async function adminLeague(body) {
+  const d = await api('GET', '/pen/cup');
+  body.replaceChildren(h('section', { class: 'panel' }, h('h3', { class: 'mb6' }, 'Penalty league'),
+    d.league.started
+      ? [h('div', { class: 'banner good mb14' }, 'The league is running since ' + new Date(d.league.startedAt).toLocaleString() + '.'), h('p', { class: 'muted' }, 'Matches started after that moment count in the table. Earlier matches stay friendlies.')]
+      : [h('p', { class: 'muted mb14' }, 'Until you start the league every penalty match is a friendly and the table stays empty. After you press the button, every match that STARTS counts: win 3, draw 1, loss 0. This cannot be undone.'),
+        h('button', { class: 'btn primary', onclick: async () => { const v = await ask({ title: 'Start the penalty league', text: 'From now on every new penalty match counts in the table. Matches already played stay friendlies.', confirm: 'Start league' }); if (v) run(api('POST', '/admin/pen/league/start'), 'League started', () => adminLeague(body)); } }, 'Start league')]),
+    h('h3', { class: 'mt14 mb6' }, 'Table'), cupTable(d.standings, d.league.started), h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent));
+}
+
 // ---------- router ----------
 function render() {
   if (S.off) return app.replaceChildren(authShell([h('h2', null, 'AUREX is offline'), h('p', { class: 'muted mt8' }, S.off)]));
@@ -308,6 +363,7 @@ function render() {
   if (r === '' || r === 'team') return viewTeam();
   if (r === 'teams') return viewTeams();
   if (r === 'clubs') return viewClubs();
+  if (r === 'cup') return viewCup();
   if (r === 'account') return viewAccount();
   if (r === 'owner-setup') return viewOwnerSetup();
   if (r === 'admin') return viewAdmin(path[1]);

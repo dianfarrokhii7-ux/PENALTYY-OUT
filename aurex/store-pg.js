@@ -178,6 +178,30 @@ function create(url, env = process.env) {
       const r = await q('SELECT logo_mime, logo_data FROM teams WHERE id = $1 AND logo_data IS NOT NULL', [teamId]);
       return r.rows[0] ? { mime: r.rows[0].logo_mime, data: r.rows[0].logo_data } : null;
     },
+    // ---- AUREX penalty cup
+    async getPenLeague() { const r = (await q('SELECT started_at, started_by FROM aurex_pen_league WHERE id = 1')).rows[0]; return { started: !!(r && r.started_at), startedAt: r ? iso(r.started_at) : null, startedBy: r ? r.started_by : null }; },
+    async startPenLeague(userId) {
+      const r = await q('UPDATE aurex_pen_league SET started_at = now(), started_by = $1 WHERE id = 1 AND started_at IS NULL RETURNING started_at', [userId]);
+      if (r.rowCount) return { kind: 'OK', startedAt: iso(r.rows[0].started_at) };
+      return { kind: 'ALREADY', startedAt: iso((await q('SELECT started_at FROM aurex_pen_league WHERE id = 1')).rows[0].started_at) };
+    },
+    async recordPenMatch(m) {
+      const r = await q(`INSERT INTO aurex_pen_matches(id, team_a, team_b, player_a, player_b, goals_a, goals_b, kicks_a, kicks_b, result, reason, league, var_count, detail)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (id) DO NOTHING`,
+        [m.id, m.teamA, m.teamB, m.playerA || null, m.playerB || null, m.goalsA, m.goalsB, m.kicksA || 0, m.kicksB || 0, m.result, m.reason, !!m.league, m.varCount || 0, m.detail ? JSON.stringify(m.detail) : null]);
+      return { kind: r.rowCount ? 'OK' : 'DUP' };
+    },
+    async listPenMatches({ leagueOnly = false, limit = 50 } = {}) {
+      const r = await q(`SELECT m.*, ta.name AS ta_name, tb.name AS tb_name, ua.username AS ua_name, ub.username AS ub_name FROM aurex_pen_matches m
+        JOIN teams ta ON ta.id = m.team_a JOIN teams tb ON tb.id = m.team_b LEFT JOIN users ua ON ua.id = m.player_a LEFT JOIN users ub ON ub.id = m.player_b
+        WHERE ($1::boolean = FALSE OR m.league) ORDER BY m.finished_at DESC, m.id DESC LIMIT $2`, [!!leagueOnly, limit]);
+      return r.rows.map(x => ({ id: x.id, teamA: x.team_a, teamB: x.team_b, playerA: x.player_a, playerB: x.player_b, goalsA: x.goals_a, goalsB: x.goals_b, kicksA: x.kicks_a, kicksB: x.kicks_b,
+        result: x.result, reason: x.reason, league: x.league, varCount: x.var_count, finishedAt: iso(x.finished_at), teamAName: x.ta_name, teamBName: x.tb_name, playerAName: x.ua_name || '?', playerBName: x.ub_name || '?' }));
+    },
+    async allLeaguePenMatches() {
+      const r = await q('SELECT id, team_a, team_b, goals_a, goals_b, result, finished_at FROM aurex_pen_matches WHERE league ORDER BY finished_at, id');
+      return r.rows.map(x => ({ id: x.id, teamA: x.team_a, teamB: x.team_b, goalsA: x.goals_a, goalsB: x.goals_b, result: x.result, finishedAt: iso(x.finished_at) }));
+    },
     // audit
     async addAudit({ actorId, action, targetType, targetId, detail }) {
       await q('INSERT INTO audit_log(actor_id, action, target_type, target_id, detail) VALUES ($1,$2,$3,$4,$5)',

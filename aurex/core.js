@@ -3,6 +3,7 @@
 const C = require('./crypto');
 const V = require('./validate');
 const { err } = require('./errors');
+const Rules = require('./pen-rules');
 
 const SESSION_MS = 30 * 24 * 3600 * 1000;
 const MIN = 60e3, HOUR = 3600e3;
@@ -178,6 +179,14 @@ function createCore({ store, env = process.env }) {
     return team?{teamId:team.id,club:await store.getClubSelection(team.id)}:null;
   }
 
+  // ---------- AUREX penalty cup: league switch, table, results ----------
+  async function penCup() {
+    const [league, teams, lm, recent] = await Promise.all([store.getPenLeague(), store.listTeams(), store.allLeaguePenMatches(), store.listPenMatches({ limit: 25 })]);
+    const shown = teams.filter(t => ['approved', 'active', 'suspended'].includes(t.status));
+    const standings = Rules.computeStandings(shown.map(t => ({ id: t.id, name: t.name, teamCode: t.teamCode, hasLogo: t.hasLogo })), lm);
+    return { league: { started: league.started, startedAt: league.startedAt }, standings,
+      recent: recent.map(m => ({ id: m.id, teamA: m.teamAName, teamB: m.teamBName, teamAId: m.teamA, teamBId: m.teamB, playerA: m.playerAName, playerB: m.playerBName, goalsA: m.goalsA, goalsB: m.goalsB, result: m.result, reason: m.reason, league: !!m.league, varCount: m.varCount || 0, finishedAt: m.finishedAt })) };
+  }
   // ---------- owner panel ----------
   async function mustTeam(id) { const t = await store.getTeamById(id); if (!t) throw err(404, 'TEAM_NOT_FOUND', 'Team not found.'); return t; }
   const bad = (t, what) => err(409, 'BAD_STATE', `Cannot ${what}: team is ${t.status}.`);
@@ -270,9 +279,16 @@ function createCore({ store, env = process.env }) {
       assertOwner(actor); await mustTeam(id); await store.releaseFootballClub(id);
       await audit(actor,'club.release','team',id); return {ok:true};
     },
+    async startPenLeague(actor) {
+      assertOwner(actor);
+      const r = await store.startPenLeague(actor.id);
+      if (r.kind === 'ALREADY') throw err(409, 'LEAGUE_ALREADY_STARTED', 'The league has already started.');
+      await audit(actor, 'pen.league.start', 'league', 1, { startedAt: r.startedAt });
+      return { ok: true, startedAt: r.startedAt };
+    },
     async listAudit(actor) { assertOwner(actor); return store.listAudit(150); },
   };
 
-  return { authenticate, register, login, logout, me, changePassword, recover, bootstrapOwner, registerTeam, publicTeams, teamLogo, setCaptainByTeam, footballClubs, selectFootballClub, myFootballClub, admin, limiter, purge: () => store.purgeExpiredSessions() };
+  return { authenticate, register, login, logout, me, changePassword, recover, bootstrapOwner, registerTeam, publicTeams, teamLogo, setCaptainByTeam, footballClubs, selectFootballClub, myFootballClub, penCup, admin, limiter, purge: () => store.purgeExpiredSessions() };
 }
 module.exports = { createCore, publicUser, teamView };
