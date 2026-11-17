@@ -70,8 +70,9 @@ function flashCard(who, name) { text('cardText', `YELLOW CARD · ${String(name).
 function roleText() {
   if (!turn) return '';
   const k = turn.retake ? ' <b>(retake)</b>' : '';
-  if (role === 'shooter') return `<b>YOU SHOOT</b>${k} — aim with the mouse / finger, hold <b>SPACE</b> to charge, release to shoot. <b>Q / E</b> curve · <b>F</b> feint (early in the run-up only).`;
-  if (role === 'keeper') return `<b>YOU ARE THE GOALKEEPER</b>${k} — <b>A / D</b> move, <b>W</b> steps off the line (VAR watches!), dive: <b>← →</b> low · <b>Q / E</b> high · <b>↑</b> jump.`;
+  const touch = matchMedia('(pointer:coarse)').matches;
+  if (role === 'shooter') return touch ? `<b>YOU SHOOT</b>${k} — touch the goal to aim, <b>hold SHOOT</b> to charge, release to kick. ⟲ ⟳ curve · FEINT early in the run-up.` : `<b>YOU SHOOT</b>${k} — aim with the mouse / finger, hold <b>SPACE</b> to charge, release to shoot. <b>Q / E</b> curve · <b>F</b> feint (early in the run-up only).`;
+  if (role === 'keeper') return touch ? `<b>YOU ARE THE GOALKEEPER</b>${k} — move with the left pad (▲ steps off the line, VAR watches!), dive with the right pad.` : `<b>YOU ARE THE GOALKEEPER</b>${k} — <b>A / D</b> move, <b>W</b> steps off the line (VAR watches!), dive: <b>← →</b> low · <b>Q / E</b> high · <b>↑</b> jump.`;
   return `<b>${esc(turn.shooterName || '')}</b> shoots against <b>${esc(turn.keeperName || '')}</b>${k} — your turn comes next, watch the kick.`;
 }
 

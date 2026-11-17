@@ -6,8 +6,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
 #vig{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 55%,rgba(2,6,20,.55) 100%)}
 .hide{display:none!important}
 /* ---- scoreboard (artwork supplied by the owner: 2048×816 px, every box below is a % of that image) */
-#hud{position:fixed;inset:0;pointer-events:none;z-index:5}
-#sb{--w:min(94vw,820px);position:absolute;top:max(6px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:var(--w);aspect-ratio:2048/816;filter:drop-shadow(0 10px 24px rgba(0,0,0,.55))}
+#hud{--w:min(94vw,820px);position:fixed;inset:0;pointer-events:none;z-index:5}
+#stack{display:contents}
+#sbinfo{display:contents}
+#sb{position:absolute;top:max(6px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:var(--w);aspect-ratio:2048/816;filter:drop-shadow(0 10px 24px rgba(0,0,0,.55))}
 #sbImg{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
 .sbt{position:absolute;top:60%;height:16%;width:30.4%;display:flex;align-items:center;gap:calc(var(--w)*.008);color:#fff;font-family:var(--head)}
 .sbt.l{left:5.2%;justify-content:flex-start;padding-left:2%}.sbt.r{left:64.4%;flex-direction:row-reverse;text-align:right;padding-right:2%}
@@ -52,14 +54,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
 #pad{position:absolute;inset:auto 0 0 0;pointer-events:none;padding:0 max(10px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))}
 #pad button{pointer-events:auto;touch-action:none;border:1px solid rgba(255,255,255,.4);background:rgba(7,16,42,.7);color:#fff;border-radius:14px;font:700 18px var(--head);width:54px;height:54px;backdrop-filter:blur(3px)}
 #pad button.p{background:rgba(45,107,255,.8)}
-#padShoot{display:flex;gap:10px;justify-content:space-between;align-items:flex-end}#padShoot #shootBtn{width:110px;height:110px;border-radius:50%;font-size:20px;background:rgba(45,107,255,.75)}
+#padShoot{display:flex;gap:10px;justify-content:flex-start;align-items:flex-end}#padShoot #shootBtn{margin-left:auto;width:110px;height:110px;border-radius:50%;font-size:20px;background:rgba(45,107,255,.75)}
 #padShoot [data-k=Feint]{width:80px;font-size:12px}
 #padKeep{display:flex;justify-content:space-between;align-items:flex-end}
 #padKeep .mv,#padKeep .dv{display:flex;flex-direction:column;align-items:center;gap:6px}#padKeep .mv>div{display:flex;gap:6px}
 #padKeep .dv{display:grid;grid-template-columns:repeat(3,54px);gap:6px}#padKeep .dv button:nth-child(4){grid-column:1}#padKeep .dv button:nth-child(5){grid-column:3}
 @media (pointer:fine){#pad{display:none!important}}
 /* ---- VAR */
-#var{position:absolute;right:max(12px,env(safe-area-inset-right));top:calc(min(94vw,820px)*.4 + 30px);width:min(92vw,420px);padding:12px;border-radius:12px;background:rgba(4,9,22,.9);border:1px solid var(--gold);z-index:8;animation:slide .35s ease-out;pointer-events:none;box-shadow:0 0 40px rgba(245,200,74,.25)}
+#var{position:absolute;right:max(12px,env(safe-area-inset-right));top:calc(var(--w)*.4 + 30px);width:min(92vw,420px);padding:12px;border-radius:12px;background:rgba(4,9,22,.9);border:1px solid var(--gold);z-index:8;animation:slide .35s ease-out;pointer-events:none;box-shadow:0 0 40px rgba(245,200,74,.25)}
 @media (max-width:760px){#var{left:50%;right:auto;transform:translateX(-50%);animation:none}}
 @keyframes slide{from{opacity:0;transform:translateX(30px)}}
 .varhead{display:flex;align-items:center;gap:10px;margin-bottom:8px}.varhead b{font:800 28px/1 var(--head);padding:2px 10px;background:var(--gold);color:#101830;border-radius:4px;letter-spacing:.06em}.varhead span{font:700 13px var(--head);letter-spacing:.14em;color:var(--gold);animation:blink 1s infinite}
@@ -69,7 +71,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
 @keyframes fadein{to{opacity:1}}
 #varVerdict{margin-top:8px;padding:9px 11px;border-radius:8px;background:rgba(245,200,74,.14);border:1px solid var(--gold)}#varVerdict b{display:block;font:800 17px/1.2 var(--head);letter-spacing:.03em;color:#fff}#varVerdict span{display:block;margin-top:3px;font-size:12.5px;color:#d6e2ff}
 #varVerdict.good{background:rgba(65,224,160,.16);border-color:var(--good)}#varVerdict.bad{background:rgba(255,84,112,.16);border-color:var(--bad)}
-#callbox{position:absolute;left:50%;top:calc(min(94vw,820px)*.4 + 40px);transform:translateX(-50%);width:min(92vw,520px);padding:10px 14px;border-radius:10px;background:rgba(4,9,22,.9);border:1px solid var(--bad);text-align:center;z-index:8}#callbox b{display:block;font:800 18px var(--head);letter-spacing:.03em}#callbox span{font-size:13px;color:#d6e2ff}
+#callbox{position:absolute;left:50%;top:calc(var(--w)*.4 + 40px);transform:translateX(-50%);width:min(92vw,520px);padding:10px 14px;border-radius:10px;background:rgba(4,9,22,.9);border:1px solid var(--bad);text-align:center;z-index:8}#callbox b{display:block;font:800 18px var(--head);letter-spacing:.03em}#callbox span{font-size:13px;color:#d6e2ff}
 #cardflash{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:14px;z-index:9;animation:cardin .5s cubic-bezier(.2,1.5,.4,1)}#cardflash i{width:58px;height:82px;background:#ffd23f;border-radius:5px;box-shadow:0 0 30px #ffd23f;transform:rotate(-8deg)}#cardflash b{font:800 30px var(--head);letter-spacing:.05em;text-shadow:0 3px 16px #000}
 @keyframes cardin{from{transform:translate(-50%,-50%) scale(.2);opacity:0}}
 /* ---- intro */
@@ -107,3 +109,97 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
 .bigscore{font:800 min(22vw,110px)/1 var(--head);letter-spacing:.06em}.tagline{margin:0;padding:4px 14px;border-radius:99px;font:700 13px var(--head);letter-spacing:.1em;border:1px solid rgba(203,211,225,.4)}.tagline.league{background:var(--good);color:#06210f}
 #fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .5s;z-index:30}#fade.on{opacity:1}
 .pcard .mute{font-size:11px;opacity:.7;margin-top:2px}
+
+/* =====================================================================
+   MOBILE / TOUCH LAYOUT
+   - scoreboard is sized by BOTH width and height so it never eats a landscape phone
+   - secondary text (player names, mode tag, round label) leaves the artwork and sits in pills under it
+   - role text, hint, power/run-up bar and the curve meter live in one flex stack above the touch pad,
+     so nothing can overlap any more
+   ===================================================================== */
+@media (pointer:coarse){#hud{--w:min(94vw,640px,88vh)}}
+@media (max-width:760px),(max-height:520px){
+  #hud{--w:min(94vw,640px,88vh)}
+  #sb{filter:drop-shadow(0 6px 14px rgba(0,0,0,.55))}
+  .sbt{top:57%;height:22%;width:31%;gap:calc(var(--w)*.012)}
+  .sbt.l{left:4.6%;padding-left:1.6%}.sbt.r{left:64.4%;padding-right:1.6%}
+  .sbt .cr{height:74%;border-width:1px}
+  .sbt .tx{flex:1 1 0}
+  .sbt .tn{font-size:calc(var(--w)*.038);line-height:1.06;white-space:normal;word-break:normal;overflow-wrap:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;letter-spacing:.01em}
+  .sbt .pn{display:none}
+  .sbs{top:57.5%;height:21%;font-size:calc(var(--w)*.085)}
+  .sbc{left:46.6%;width:13.4%;top:80.4%;height:9.4%;font-size:calc(var(--w)*.05)}
+  .dots{top:82.6%;height:7%;gap:calc(var(--w)*.014)}
+  .dots.l{left:6.5%}.dots.r{left:63.5%}
+  .dots i{width:calc(var(--w)*.03);height:calc(var(--w)*.03);border-width:1px}
+  .dots i.v::after{font-size:calc(var(--w)*.022);inset:-85% auto auto 50%}
+  #sbinfo{display:flex;flex-direction:column;align-items:center;gap:4px;position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:3px;width:max-content;max-width:96vw}
+  .sbl,.modetag{position:static;transform:none;width:auto;height:auto;padding:3px 12px;border-radius:99px;background:rgba(4,9,22,.8);border:1px solid rgba(203,211,225,.35);font:700 11px/1.2 var(--head);letter-spacing:.08em;white-space:nowrap;max-width:96vw;overflow:hidden;text-overflow:ellipsis;color:#fff}
+  .modetag{font-size:10px;letter-spacing:.06em;color:var(--silver)}
+  .modetag.league{color:#06210f;background:var(--good)}
+  #banner{top:52%;font-size:min(10.5vw,17vh,84px)}
+  #banner small{font-size:min(3.6vw,5vh,18px)}
+  #cardflash{gap:10px}#cardflash i{width:38px;height:54px}#cardflash b{font-size:20px}
+  #var{top:calc(var(--w)*.4 + 56px);width:min(92vw,360px);padding:10px}
+  #callbox{top:calc(var(--w)*.4 + 56px);width:min(92vw,420px);padding:8px 12px}#callbox b{font-size:16px}#callbox span{font-size:12px}
+  .varhead b{font-size:22px}.varhead span{font-size:11px}
+  #varSteps{font-size:12px}#varVerdict b{font-size:15px}#varVerdict span{font-size:11.5px}
+  #intro .names{flex-direction:column;bottom:9%;gap:8px}
+  #intro .nc{min-width:0;width:min(88vw,340px);padding:8px 14px;gap:10px;flex-wrap:nowrap}
+  #intro .nc img{width:40px;height:40px}
+  #intro .nc b{font-size:clamp(16px,5vw,24px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#intro .nc span{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #intro .nc>*:last-child{min-width:0}
+  #intro .vs{font-size:20px;line-height:1}
+  .title img{width:min(30vw,22vh,200px)}
+  .title h1{font-size:min(11.5vw,19vh,120px)}
+  .title p{font-size:min(3.6vw,5vh,20px);letter-spacing:.28em}
+}
+@media (max-height:520px) and (min-width:500px){
+  /* landscape phone: field is short, so keep the HUD on the sides and the centre free */
+  #var{left:max(8px,env(safe-area-inset-left));right:auto;top:8px;transform:none;width:clamp(170px,calc((100vw - var(--w))/2 - 16px),250px);padding:8px;animation:none}
+  #callbox{left:auto;right:max(8px,env(safe-area-inset-right));top:8px;transform:none;width:clamp(170px,calc((100vw - var(--w))/2 - 16px),250px)}
+  #varVerdict{margin-top:6px;padding:6px 8px}#varSteps{font-size:11px;margin-top:5px}
+  #intro .names{flex-direction:row;bottom:7%;gap:12px}
+  #intro .nc{width:min(40vw,300px);padding:6px 12px}
+  #intro .nc img{width:34px;height:34px}
+  #banner{top:54%}
+}
+@media (max-width:760px),(max-height:520px),(pointer:coarse){
+  #hud{--base:max(10px,env(safe-area-inset-bottom))}
+  #hud:has(#pad:not(.hide)){--base:calc(max(8px,env(safe-area-inset-bottom)) + 116px)}
+  #stack{display:flex;flex-direction:column;align-items:center;gap:6px;position:absolute;left:50%;transform:translateX(-50%);bottom:var(--base);width:min(94vw,520px);pointer-events:none}
+  #stack>*{position:relative;transform:none;left:auto;bottom:auto;right:auto;top:auto;margin:0}
+  #role{order:1;width:100%;max-width:100%;padding:6px 12px;border-radius:10px;font:600 12.5px/1.35 var(--body)}
+  #role:empty,#hint:empty{display:none}
+  #curveui{order:2;flex-direction:row;gap:8px;font-size:10px}#curveui>div{width:110px}#curveui span{display:none}
+  #hint{order:3;font:600 12.5px/1.3 var(--body);white-space:normal;text-align:center;padding:2px 10px;max-width:100%}
+  #runbar,#power{order:4;width:min(72vw,320px);height:14px}
+  #power span,#runbar em{font-size:9px}
+  #conn{top:auto;bottom:calc(var(--base) + 150px)}
+  /* touch pad: slightly smaller buttons, SHOOT sized for a thumb */
+  #pad{padding-bottom:max(8px,env(safe-area-inset-bottom))}
+  #pad button{width:50px;height:50px;border-radius:12px;font-size:17px}
+  #padShoot #shootBtn{width:96px;height:96px;font-size:18px}
+  #padShoot [data-k=Feint]{width:70px;font-size:11px}
+  #padKeep .dv{grid-template-columns:repeat(3,50px)}
+}
+@media (max-height:520px) and (pointer:coarse){
+  #hud:has(#pad:not(.hide)){--base:max(10px,env(safe-area-inset-bottom))}
+  #stack{width:clamp(200px,calc(100vw - 440px),420px)}#runbar,#power{width:100%}#curveui>div{width:80px}
+  #pad button{width:46px;height:46px}
+  #padShoot #shootBtn{width:84px;height:84px}
+  #padShoot [data-k=Feint]{width:62px}
+  #padKeep .dv{grid-template-columns:repeat(3,46px)}
+  #role{font-size:11.5px;padding:4px 10px}
+  #conn{bottom:auto;top:44%}
+}
+/* menus: safe centring (no clipped top when the screen is taller than the viewport) + short-screen tweaks */
+#menu{align-items:flex-start}.screen{margin:auto}
+@media (max-height:520px){
+  #menu{padding:10px}.screen{gap:8px}
+  .logo{width:min(18vh,90px)}.logo.sm{width:min(16vh,80px)}
+  .screen h1{font-size:clamp(28px,9vh,44px)}.screen h2{font-size:22px}
+  .btn{min-height:42px}.btn.big{min-height:46px;font-size:18px}.pcard{min-height:84px}.code{font-size:28px}
+  .bigscore{font-size:min(22vh,80px)}
+}
+@media (max-width:380px){.sub{font-size:14px}.btn{padding:0 14px}.screen h2{font-size:24px}}
