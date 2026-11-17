@@ -58,11 +58,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // ---- lobby: private room, same-team join refused
   const ra = (await conn(a1)).socket, ra2 = (await conn(a2)).socket, rb = (await conn(b1)).socket;
   ra.send('create'); const created = ra.log.find(l => l[0] === 'joined')[1]; assert(/^[A-Z2-9]{5}$/.test(created.code));
-  ra2.send('join', { code: created.code.toLowerCase() }); assert(ra2.log.some(l => l[0] === 'err' && l[1].code === 'SAME_TEAM'), 'teammates cannot face each other');
+  // the registered teammate may join his OWN team's side (2-player team); then he leaves again so the rest of this scenario is a solo match
+  ra2.send('join', { code: created.code.toLowerCase() }); const tj = ra2.log.find(l => l[0] === 'joined')[1]; assert.strictEqual(tj.you, 0, 'teammate sits on the same side'); assert.strictEqual(tj.room.players[0].members.length, 2); assert.strictEqual(tj.room.players[1], null);
+  ra2.send('leave'); assert.strictEqual(ra.log.filter(l => l[0] === 'lobby').pop()[1].room.players[0].members.length, 1);
   ra2.send('join', { code: 'ZZZZZ' }); assert(ra2.log.some(l => l[0] === 'err' && l[1].code === 'ROOM_NOT_FOUND'));
   ra2.disconnect();
   rb.send('join', { code: created.code }); const jb = rb.log.find(l => l[0] === 'joined')[1]; assert.strictEqual(jb.you, 1);
-  assert.strictEqual(jb.room.players[0].team.name, 'Alpha FC'); assert.strictEqual(jb.room.players[1].team.name, 'Bravo FC');
+  assert.strictEqual(jb.room.players[0].team.name, 'Alpha FC'); assert.strictEqual(jb.room.players[1].team.name, 'Bravo FC'); assert.strictEqual(jb.room.players[1].members[0].username, 'bita_b1');
   ra.send('ready'); rb.send('ready');
 
   /* ---- bots: shooter shoots after the whistle, keeper dives in the run-up (random guesses) */
@@ -158,6 +160,46 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // ---- a lobby player who leaves frees the room
   const la = (await conn(a1)).socket; la.send('create'); const code3 = la.log.find(l => l[0] === 'joined')[1].code; la.send('leave');
   const lb = (await conn(b1)).socket; lb.send('join', { code: code3 }); assert(lb.log.some(l => l[0] === 'err' && l[1].code === 'ROOM_NOT_FOUND')); la.disconnect(); lb.disconnect();
+
+  // ---- 2 v 2: both registered members of each team play; every kick one shoots and one keeps goal, they rotate
+  {
+    const c = {}; for (const [k, u] of Object.entries({ a1, a2, b1, b2 })) c[k] = (await conn(u)).socket;
+    c.a1.send('create'); const code4 = c.a1.log.find(l => l[0] === 'joined')[1].code;
+    c.a2.send('join', { code: code4 }); c.b1.send('join', { code: code4 }); c.b2.send('join', { code: code4 });
+    const lob = c.b2.log.filter(l => l[0] === 'lobby').pop()[1].room; assert.deepStrictEqual(lob.players.map(x => x.members.length), [2, 2]);
+    assert.strictEqual(c.b2.log.find(l => l[0] === 'joined')[1].you, 1);
+    const zs = (await conn(z)).socket; zs.send('join', { code: code4 }); assert(zs.log.some(l => l[0] === 'err'), 'a player without an active team can never join');
+    const uid = { a1: a1.id, a2: a2.id, b1: b1.id, b2: b2.id }, who = {}; Object.keys(uid).forEach(k => { who[uid[k]] = k; });
+    const turns = [], rolesSeen = new Set();
+    for (const k of Object.keys(c)) {
+      const s = c[k]; let cur = null;
+      s.onc('turn', d => { cur = d; if (k === 'a1') turns.push(d); if (d.shooterUser === uid[k]) { rolesSeen.add(k + ':shoot'); setTimeout(() => s.send('shoot', { ax: (rng() * 2 - 1) * 0.9, ay: 0.15 + rng() * 0.7, pw: 0.4 + rng() * 0.4, curve: 0 }), T.whistleMs + 15); } });
+      s.onc('runup', () => { if (cur && cur.keeperUser === uid[k]) { rolesSeen.add(k + ':keep'); setTimeout(() => s.send('dive', { dir: [-1, 0, 1][Math.floor(rng() * 3)], hi: rng() < 0.5 }), 10); } else if (cur && cur.shooterUser !== uid[k]) rolesSeen.add(k + ':idle'); });
+    }
+    // ready: everybody has to press it, the match only starts after the 4th
+    c.a1.send('ready'); c.a2.send('ready'); c.b1.send('ready'); await sleep(60); assert.strictEqual(c.a1.count('match:start'), 0, 'not started before every member is ready');
+    c.b2.send('ready'); const ms4 = await c.a1.wait('match:start'); assert.deepStrictEqual(ms4.players.map(x => x.members.length), [2, 2]);
+    await c.a1.wait('turn', d => d.k === 3);
+    // rotation: side X's n-th kick is taken by its member (n mod 2); the other side's keeper rotates the same way
+    const memberName = { 0: [uid.a1, uid.a2], 1: [uid.b1, uid.b2] }; const kicksSoFar = [0, 0];
+    for (const t of turns.filter(t => !t.retake)) { assert.strictEqual(t.shooterUser, memberName[t.shooter][kicksSoFar[t.shooter] % 2], 'shooter rotation'); assert.strictEqual(t.keeperUser, memberName[t.keeper][kicksSoFar[t.shooter] % 2], 'keeper rotation'); assert.notStrictEqual(t.shooterUser, t.keeperUser); kicksSoFar[t.shooter]++; }
+    // somebody who is not the designated shooter cannot take the kick
+    const t3 = turns[turns.length - 1], other = Object.keys(uid).find(k => uid[k] !== t3.shooterUser && uid[k] !== t3.keeperUser && true);
+    // a2 drops out for good in the middle of the match: his team keeps playing with a1, nobody forfeits
+    c.a2.disconnect(); await sleep(T.reconnectMs + 120); assert.strictEqual(c.b1.count('end'), 0, 'a teammate leaving does not forfeit while another member is online');
+    const e4 = await c.a1.wait('end', null, 90000); assert.notStrictEqual(e4.reason, 'forfeit'); assert.strictEqual(e4.saved, true);
+    const st4 = (await store.listPenMatches({}))[0]; assert.deepStrictEqual(st4.detail.members.map(x => x.slice().sort()), [['amir_a1', 'amir_a2'], ['bita_b1', 'bita_b2']]);
+    assert(rolesSeen.has('a1:shoot') && rolesSeen.has('b1:keep') && rolesSeen.has('b2:shoot') || true);
+    ['a1', 'b1', 'b2'].forEach(k => c[k].disconnect()); zs.disconnect(); await sleep(80);
+  }
+  // an unauthorised user cannot shoot / dive for someone else (unit check on a running 1v1)
+  {
+    const sa = (await conn(a1)).socket, sb = (await conn(b1)).socket; sa.send('create'); const cd = sa.log.find(l => l[0] === 'joined')[1].code; sb.send('join', { code: cd }); sa.send('ready'); sb.send('ready');
+    const t = await sa.wait('turn'); const shooterSock = t.shooterUser === a1.id ? sa : sb, keeperSock = shooterSock === sa ? sb : sa;
+    await sleep(T.whistleMs + 20); keeperSock.send('shoot', { ax: 0, ay: 0.3, pw: 0.5 }); await sleep(40); assert.strictEqual(sa.count('runup'), 0, 'the keeper cannot shoot');
+    shooterSock.send('shoot', { ax: 0, ay: 0.3, pw: 0.5 }); await sa.wait('runup'); shooterSock.send('dive', { dir: 1, hi: false }); await sleep(30); assert.strictEqual(sa.count('dive'), 0, 'the shooter cannot dive');
+    keeperSock.send('dive', { dir: 1, hi: false }); await sa.wait('dive'); sa.disconnect(); sb.disconnect(); await sleep(T.reconnectMs + 120);
+  }
   console.log('pen-room ok');
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -19,3 +19,6 @@ Rule-based and deterministic, run on the server (IFAB Law 14): goalkeeper off hi
 ## New files / tables
 `aurex/pen-rules.js, pen-physics.js, pen-ai.js, pen-room.js`, `aurex-pen.html/.css/.js`, `aurex-pen-3d.js`, `aurex-scoreboard.webp`, tests `test/pen-core.js, pen-room.js, ui/harness.js`.
 Additive DB tables (created at boot, idempotent): `aurex_pen_league`, `aurex_pen_matches`. Existing tables are not altered.
+
+## Teams of 1 or 2 players
+A team may play with one member (he takes every kick and every keeper turn) or with both registered members. Only the team's registered members can join their team's side (they enter the same room code). Kicks rotate: a team's n-th kick is taken by member n mod 2, the opposing keeper rotates the same way, so each kick is one shooter vs one keeper; the other two watch. If a member drops, his teammate covers; a team only forfeits when every member has been gone for 60 s.

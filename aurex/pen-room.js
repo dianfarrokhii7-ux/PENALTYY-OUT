@@ -13,7 +13,7 @@ const P = require('./pen-physics');
 const { judge } = require('./pen-ai');
 const { C } = P;
 
-const DEFAULT_TIMING = { aimMs: 25000, introMs: 10000, whistleMs: 1600, resultMs: 3600, varExtraMs: 1200, retakeMs: 2600, reconnectMs: 60000, queueMs: 180000, tickMs: 40, streamMs: 50, lookMs: 160, cleanupMs: 90000 };
+const DEFAULT_TIMING = { aimMs: 25000, introMs: 10000, whistleMs: 1600, resultMs: 3600, varExtraMs: 1200, retakeMs: 2600, reconnectMs: 60000, queueMs: 180000, tickMs: 40, streamMs: 50, lookMs: 250, cleanupMs: 90000 };
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -32,8 +32,10 @@ function attach(io, { store, api }, opts = {}) {
   /* ---------------------------------------------------------------- helpers */
   const newCode = () => { let c; do { c = Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(rng() * CODE_CHARS.length)]).join(''); } while (rooms.has(c)); return c; };
   const emit = (r, ev, data) => nsp.to(r.code).emit(ev, { ...data, ts: now() });
-  const toSock = (p, ev, data) => { const s = p && userSocket.get(p.userId); if (s) s.emit(ev, { ...data, ts: now() }); };
-  const pub = p => p ? { userId: p.userId, username: p.username, on: p.on, ready: p.ready, team: p.team, yellow: p.yellow } : null;
+  // a "side" is one TEAM in the duel: 1 or 2 registered members of that team (solo play is allowed)
+const memberView = m => ({ userId: m.userId, username: m.username, on: m.on, ready: m.ready });
+const pub = s => s ? { team: s.team, members: s.members.map(memberView), on: s.members.some(m => m.on), ready: s.members.length > 0 && s.members.every(m => m.ready), yellow: s.yellow, userId: s.members[0] && s.members[0].userId, username: s.members.map(m => m.username).join(' & ') } : null;
+const MAX_MEMBERS = 2;
   const clearTimers = r => { for (const k of Object.keys(r.t)) { clearTimeout(r.t[k]); clearInterval(r.t[k]); } r.t = {}; };
   const scoreView = r => r.sh ? { kicks: [...r.sh.kicks], goals: [...r.sh.goals], log: r.sh.log.map(l => l.map(e => ({ ...e }))), first: r.sh.first } : null;
   const roomView = r => ({ code: r.code, phase: r.phase, league: r.league, players: r.players.map(pub), ...(r.sh ? scoreView(r) : {}) });
@@ -64,14 +66,19 @@ function attach(io, { store, api }, opts = {}) {
     const r = { code: newCode(), id: crypto.randomUUID(), phase: 'lobby', players: [null, null], league: false, sh: null, t: {}, turn: null, waiting: false, saved: false, varCount: 0, vars: [], createdAt: now(), ended: false };
     rooms.set(r.code, r); return r;
   }
+  /** Seats a user on the side of HIS team (a second registered member joins his teammate's side) or on a free side. Returns the side index or -1. */
   function seat(r, sock) {
-    const u = sock.data.user, i = r.players[0] ? 1 : 0;
-    r.players[i] = { userId: u.id, username: u.username, team: sock.data.team, on: true, ready: false, yellow: 0, kp: { x: 0, kz: 0 }, inp: { mx: 0, mz: 0 }, dt: null };
+    const u = sock.data.user, team = sock.data.team;
+    let i = r.players.findIndex(x => x && x.team.id === team.id);
+    if (i < 0) { i = r.players[0] ? (r.players[1] ? -1 : 1) : 0; if (i < 0) return -1; r.players[i] = { team, members: [], yellow: 0, kp: { x: 0, kz: 0 }, inp: { mx: 0, mz: 0 }, dt: null }; }
+    const side = r.players[i]; if (side.members.length >= MAX_MEMBERS) return -1;
+    side.members.push({ userId: u.id, username: u.username, on: true, ready: false, yellow: 0 });
     userRoom.set(u.id, r); sock.join(r.code); queue = queue.filter(q => q.userId !== u.id);
     return i;
   }
-  const idxOf = (r, userId) => r.players.findIndex(p => p && p.userId === userId);
-  function destroy(r) { clearTimers(r); for (const p of r.players) if (p && userRoom.get(p.userId) === r) userRoom.delete(p.userId); rooms.delete(r.code); }
+  const memberOf = (r, userId) => { for (const sd of r.players) { const m = sd && sd.members.find(x => x.userId === userId); if (m) return m; } return null; };
+  const idxOf = (r, userId) => r.players.findIndex(s => s && s.members.some(m => m.userId === userId));
+  function destroy(r) { clearTimers(r); for (const sd of r.players) if (sd) for (const m of sd.members) if (userRoom.get(m.userId) === r) userRoom.delete(m.userId); rooms.delete(r.code); }
   function lobbyUpdate(r) { emit(r, 'lobby', { room: roomView(r) }); }
 
   function checkEligible(sock) {
@@ -83,8 +90,9 @@ function attach(io, { store, api }, opts = {}) {
     queue = queue.filter(q => q.userId !== sock.data.user.id);
     if (!r || r.phase !== 'lobby') return;
     const i = idxOf(r, sock.data.user.id); sock.leave(r.code); userRoom.delete(sock.data.user.id);
-    r.players[i] = null; if (r.players[0] === null && r.players[1]) { r.players[0] = r.players[1]; r.players[1] = null; }
-    if (!r.players[0]) destroy(r); else { r.players.forEach(p => { if (p) p.ready = false; }); lobbyUpdate(r); }
+    if (i >= 0) { const sd = r.players[i]; sd.members = sd.members.filter(m => m.userId !== sock.data.user.id); if (!sd.members.length) r.players[i] = null; }
+    if (r.players[0] === null && r.players[1]) { r.players[0] = r.players[1]; r.players[1] = null; }
+    if (!r.players[0]) destroy(r); else { r.players.forEach(sd => { if (sd) sd.members.forEach(m => { m.ready = false; }); }); lobbyUpdate(r); }
   }
   function tryQuick(sock) {
     const me = sock.data.user.id;
@@ -92,7 +100,7 @@ function attach(io, { store, api }, opts = {}) {
     if (!cand) { queue = queue.filter(q => q.userId !== me); queue.push({ userId: me, at: now() }); sock.emit('queue', { waiting: true }); return; }
     const other = userSocket.get(cand.userId); queue = queue.filter(q => q.userId !== cand.userId && q.userId !== me);
     const r = makeRoom(); seat(r, other); seat(r, sock);
-    other.emit('joined', { you: 0, code: r.code, room: roomView(r), ts: now() }); sock.emit('joined', { you: 1, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
+    other.emit('joined', { you: 0, uid: other.data.user.id, code: r.code, room: roomView(r), ts: now() }); sock.emit('joined', { you: 1, uid: sock.data.user.id, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
   }
 
   /* ---------------------------------------------------------------- match flow */
@@ -107,17 +115,25 @@ function attach(io, { store, api }, opts = {}) {
     r.t.intro = setTimeout(() => nextKick(r), T.introMs);
   }
 
+  /** 2-player teams: the members of a team take turns. Kick n of a side is taken by member (n mod size); the keeper of the other side rotates the same way.
+   *  A member who is offline is skipped (his teammate covers); a solo team plays every role itself. A retake keeps the same two people. */
+  function pickActors(r, side) {
+    const att = r.players[side], def = r.players[1 - side], n = r.sh.kicks[side];
+    const pick = (sd, idx) => { for (let k = 0; k < sd.members.length; k++) { const m = sd.members[(idx + k) % sd.members.length]; if (m.on) return m; } return null; };
+    const shooter = pick(att, n), keeper = pick(def, n);
+    return shooter && keeper ? { shooter, keeper } : null;
+  }
   function nextKick(r, retakes = 0) {
     if (r.ended) return;
     clearTimeout(r.t.intro); clearTimeout(r.t.next);
-    if (r.players.some(p => !p.on)) { r.waiting = true; r.waitRetakes = retakes; r.phase = 'waiting'; emit(r, 'room', { room: roomView(r) }); return; }
+    const side = Rules.shooterOf(r.sh), keeper = 1 - side, nowMs = now(), who = pickActors(r, side);
+    if (!who) { r.waiting = true; r.waitRetakes = retakes; r.phase = 'waiting'; emit(r, 'room', { room: roomView(r) }); return; }
     r.waiting = false;
-    const side = Rules.shooterOf(r.sh), keeper = 1 - side, nowMs = now();
     r.k++;
-    r.turn = { k: r.k, side, keeper, retakes, whistleAt: nowMs + T.whistleMs, deadline: nowMs + T.whistleMs + T.aimMs, input: null, runAt: 0, strikeAt: 0, feint: null, dive: null, sim: null, sentIdx: 0, sentEv: 0, done: false, kzAtStrike: 0, kpAtStrike: null, diveDeadline: 0 };
+    r.turn = { k: r.k, side, keeper, shooterUser: who.shooter.userId, keeperUser: who.keeper.userId, retakes, whistleAt: nowMs + T.whistleMs, deadline: nowMs + T.whistleMs + T.aimMs, input: null, runAt: 0, strikeAt: 0, feint: null, dive: null, sim: null, sentIdx: 0, sentEv: 0, done: false, kzAtStrike: 0, kpAtStrike: null, diveDeadline: 0 };
     for (const p of r.players) { p.kp = { x: 0, kz: 0 }; p.inp = { mx: 0, mz: 0 }; }
     r.phase = 'aim';
-    emit(r, 'turn', { k: r.k, shooter: side, keeper, retake: retakes, round: Rules.roundOf(r.sh, side), whistleAt: r.turn.whistleAt, deadline: r.turn.deadline, ...scoreView(r), cards: r.players.map(p => p.yellow) });
+    emit(r, 'turn', { k: r.k, shooter: side, keeper, shooterUser: who.shooter.userId, keeperUser: who.keeper.userId, shooterName: who.shooter.username, keeperName: who.keeper.username, retake: retakes, round: Rules.roundOf(r.sh, side), whistleAt: r.turn.whistleAt, deadline: r.turn.deadline, ...scoreView(r), cards: r.players.map(p => p.yellow) });
     r.t.tick = setInterval(() => tickKeeper(r), T.tickMs);
     r.t.aim = setTimeout(() => aimTimeout(r), T.whistleMs + T.aimMs);
   }
@@ -135,22 +151,22 @@ function attach(io, { store, api }, opts = {}) {
     conclude(r, { final: 'miss', retake: false, cards: [], call: null, var: null, timeout: true, measures: {} }, null);
   }
 
-  function onShoot(r, i, d) {
-    const t = r.turn; if (!t || r.phase !== 'aim' || i !== t.side || now() < t.whistleAt) return;
+  function onShoot(r, uid, d) {
+    const t = r.turn; if (!t || r.phase !== 'aim' || uid !== t.shooterUser || now() < t.whistleAt) return;
     t.input = { ax: clamp(num(d.ax), -1.4, 1.4), ay: clamp(num(d.ay), 0, 1.45), pw: clamp(num(d.pw, 0.5), 0.2, 1), curve: clamp(num(d.curve), -1, 1) };
     clearTimeout(r.t.aim); r.phase = 'runup'; t.runAt = now(); t.strikeAt = t.runAt + RUN;
     emit(r, 'runup', { k: t.k, runAt: t.runAt, strikeAt: t.strikeAt, runMs: RUN });
     r.t.strike = setTimeout(() => strike(r), RUN);
   }
-  function onFeint(r, i) {
-    const t = r.turn; if (!t || r.phase !== 'runup' || i !== t.side || t.feint) return;
+  function onFeint(r, uid) {
+    const t = r.turn; if (!t || r.phase !== 'runup' || uid !== t.shooterUser || t.feint) return;
     const progress = (now() - t.runAt) / RUN; if (progress < 0.05 || progress >= 1) return;
     t.feint = { progress: +progress.toFixed(3) }; t.strikeAt += FDELAY;
     clearTimeout(r.t.strike); r.t.strike = setTimeout(() => strike(r), Math.max(0, t.strikeAt - now()));
     emit(r, 'feint', { k: t.k, progress: t.feint.progress, strikeAt: t.strikeAt });
   }
-  function onDive(r, i, d) {
-    const t = r.turn; if (!t || i !== t.keeper || t.dive || (r.phase !== 'runup' && r.phase !== 'flight')) return;
+  function onDive(r, uid, d) {
+    const t = r.turn; if (!t || uid !== t.keeperUser || t.dive || (r.phase !== 'runup' && r.phase !== 'flight')) return;
     const dir = clamp(Math.round(num(d.dir)), -1, 1), hi = !!d.hi; if (dir === 0 && !hi) return;
     if (r.phase === 'flight' && now() > t.diveDeadline) return;
     const p = r.players[t.keeper];
@@ -197,7 +213,7 @@ function attach(io, { store, api }, opts = {}) {
   function finalizeKick(r) {
     const t = r.turn; if (!t || r.phase !== 'flight' || t.done) return;
     t.done = true; t.sim = simulateTurn(r);
-    const decision = judge({ sim: t.sim, kz: t.kzAtStrike, feintProgress: t.feint ? t.feint.progress : null, keeperYellows: r.players[t.keeper].yellow, retakes: t.retakes });
+    const decision = judge({ sim: t.sim, kz: t.kzAtStrike, feintProgress: t.feint ? t.feint.progress : null, keeperYellows: (memberOf(r, t.keeperUser) || {}).yellow || 0, retakes: t.retakes });
     const s = t.sim, cross = s.crossing ? s.crossing.t : null;
     const revealMs = Math.min(s.endT, cross != null ? cross + 0.45 : s.keeperTouch ? s.keeperTouch.t + 0.9 : s.endT) * 1000;
     r.phase = 'reveal';
@@ -209,8 +225,8 @@ function attach(io, { store, api }, opts = {}) {
     const t = r.turn; if (!t || r.ended) return;
     clearTimeout(r.t.aim); clearInterval(r.t.stream); clearInterval(r.t.tick);
     const finish = () => {
-      for (const c of d.cards) { const idx = c.who === 'shooter' ? t.side : t.keeper; r.players[idx].yellow++; }
-      const base = { k: t.k, shooter: t.side, keeper: t.keeper, outcome: sim ? sim.outcome : 'miss', timeout: !!d.timeout, retake: !!d.retake, awardedGoal: !!d.awardedGoal, cards: d.cards, call: d.call, var: d.var ? { reasons: d.var.reasons, verdict: d.var.verdict } : null, measures: d.measures, cardsTotal: r.players.map(p => p.yellow) };
+      for (const c of d.cards) { const idx = c.who === 'shooter' ? t.side : t.keeper, m = memberOf(r, c.who === 'shooter' ? t.shooterUser : t.keeperUser); if (m) m.yellow = (m.yellow || 0) + 1; r.players[idx].yellow++; }   // cautions belong to the PERSON, the team total is shown
+      const base = { k: t.k, shooter: t.side, keeper: t.keeper, shooterUser: t.shooterUser, keeperUser: t.keeperUser, shooterName: (memberOf(r, t.shooterUser) || {}).username, keeperName: (memberOf(r, t.keeperUser) || {}).username, outcome: sim ? sim.outcome : 'miss', timeout: !!d.timeout, retake: !!d.retake, awardedGoal: !!d.awardedGoal, cards: d.cards, call: d.call, var: d.var ? { reasons: d.var.reasons, verdict: d.var.verdict } : null, measures: d.measures, cardsTotal: r.players.map(p => p.yellow) };
       if (d.retake) {
         r.phase = 'result'; emit(r, 'result', { ...base, final: 'retake', ...scoreView(r), over: false });
         r.t.next = setTimeout(() => nextKick(r, t.retakes + 1), T.retakeMs + (d.var ? T.varExtraMs : 0)); return;
@@ -236,21 +252,22 @@ function attach(io, { store, api }, opts = {}) {
     const a = r.sh ? r.sh.goals : [0, 0];
     const table = forfeit ? (winner === 0 ? [3, 0] : [0, 3]) : [a[0], a[1]];
     const result = Rules.outcomeOf(winner);
-    const rec = { id: r.id, teamA: r.players[0].team.id, teamB: r.players[1].team.id, playerA: r.players[0].userId, playerB: r.players[1].userId, goalsA: table[0], goalsB: table[1],
+    const rec = { id: r.id, teamA: r.players[0].team.id, teamB: r.players[1].team.id, playerA: r.players[0].members[0].userId, playerB: r.players[1].members[0].userId, goalsA: table[0], goalsB: table[1],
       kicksA: r.sh ? r.sh.kicks[0] : 0, kicksB: r.sh ? r.sh.kicks[1] : 0, result, reason: forfeit ? 'forfeit' : reason, league: r.league, varCount: r.varCount,
-      detail: { first: r.sh && r.sh.first, log: r.sh && r.sh.log, cards: r.players.map(p => p.yellow), vars: r.vars, actual: a } };
+      detail: { members: r.players.map(sd => sd.members.map(m => m.username)), first: r.sh && r.sh.first, log: r.sh && r.sh.log, cards: r.players.map(p => p.yellow), vars: r.vars, actual: a } };
     let saved = false;
     for (let attempt = 0; attempt < 3 && !saved; attempt++) { try { await store.recordPenMatch(rec); saved = true; } catch (e) { console.error('[aurex-pen] could not store result:', e.message); await new Promise(res => setTimeout(res, 400)); } }
     r.saved = saved;
     emit(r, 'end', { matchId: r.id, winner, result, reason: rec.reason, league: r.league, table, actual: a, saved, ...(r.sh ? scoreView(r) : {}), players: r.players.map(pub), varCount: r.varCount, cards: r.players.map(p => p.yellow) });
-    for (const p of r.players) if (p && userRoom.get(p.userId) === r) userRoom.delete(p.userId);
+    for (const sd of r.players) if (sd) for (const m of sd.members) if (userRoom.get(m.userId) === r) userRoom.delete(m.userId);
     r.t.cleanup = setTimeout(() => destroy(r), T.cleanupMs);
   }
-  function startForfeitTimer(r, i) {
-    const p = r.players[i]; clearTimeout(p.dt);
-    p.dt = setTimeout(() => {
-      if (p.on || r.ended || !r.sh) return;
-      if (r.players.every(q => !q.on)) { r.ended = true; destroy(r); return; }     // both gone: nobody wins, nothing is recorded
+  const sideOn = sd => sd.members.some(m => m.on);
+  function startForfeitTimer(r, i) {                  // only when EVERY member of a team is gone
+    const sd = r.players[i]; clearTimeout(sd.dt);
+    sd.dt = setTimeout(() => {
+      if (sideOn(sd) || r.ended || !r.sh) return;
+      if (r.players.every(x => !sideOn(x))) { r.ended = true; destroy(r); return; }     // both teams gone: nobody wins, nothing is recorded
       finishMatch(r, 1 - i, 'forfeit', true);
     }, T.reconnectMs);
   }
@@ -266,57 +283,57 @@ function attach(io, { store, api }, opts = {}) {
     // reconnect into a running match
     const r0 = room();
     if (r0) {
-      const i = idxOf(r0, u.id), p = r0.players[i]; p.on = true; clearTimeout(p.dt); socket.join(r0.code);
-      socket.emit('joined', { you: i, code: r0.code, room: roomView(r0), ts: now(), resumed: true });
+      const i = idxOf(r0, u.id), sd0 = r0.players[i], mem = sd0.members.find(m => m.userId === u.id); mem.on = true; clearTimeout(sd0.dt); socket.join(r0.code);
+      socket.emit('joined', { you: i, uid: u.id, code: r0.code, room: roomView(r0), ts: now(), resumed: true });
       if (r0.sh && r0.phase !== 'lobby') {
         const t = r0.turn;
-        socket.emit('sync', { you: i, room: roomView(r0), phase: r0.phase, matchId: r0.id, league: r0.league, ...(r0.sh ? scoreView(r0) : {}), cards: r0.players.map(q => q.yellow),
-          turn: t ? { k: t.k, shooter: t.side, keeper: t.keeper, retake: t.retakes, whistleAt: t.whistleAt, deadline: t.deadline, strikeAt: t.strikeAt, runAt: t.runAt, keeperPos: r0.players[t.keeper].kp, dive: t.dive, feint: t.feint } : null, ts: now() });
+        socket.emit('sync', { you: i, uid: u.id, room: roomView(r0), phase: r0.phase, matchId: r0.id, league: r0.league, ...(r0.sh ? scoreView(r0) : {}), cards: r0.players.map(q => q.yellow),
+          turn: t ? { k: t.k, shooter: t.side, keeper: t.keeper, shooterUser: t.shooterUser, keeperUser: t.keeperUser, retake: t.retakes, whistleAt: t.whistleAt, deadline: t.deadline, strikeAt: t.strikeAt, runAt: t.runAt, keeperPos: r0.players[t.keeper].kp, dive: t.dive, feint: t.feint } : null, ts: now() });
       }
       emit(r0, 'room', { room: roomView(r0) });
-      if (r0.waiting && r0.players.every(q => q.on)) nextKick(r0, r0.waitRetakes || 0);
+      if (r0.waiting && r0.players.every(sideOn)) nextKick(r0, r0.waitRetakes || 0);
     } else socket.emit('hello', { user: u, team: socket.data.team, error: socket.data.teamError, ts: now() });
 
     socket.on('ping:t', wrap(cb => { if (typeof cb === 'function') cb(now()); }));
     socket.on('quick', wrap(() => { if (room() || !checkEligible(socket)) return; tryQuick(socket); }));
     socket.on('create', wrap(() => {
       if (room() || !checkEligible(socket)) return;
-      const r = makeRoom(); const i = seat(r, socket); socket.emit('joined', { you: i, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
+      const r = makeRoom(); const i = seat(r, socket); socket.emit('joined', { you: i, uid: u.id, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
     }));
     socket.on('join', wrap(d => {
       if (room() || !checkEligible(socket)) return;
       const code = String(d && d.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5), r = rooms.get(code);
       if (!r || r.phase !== 'lobby') return socket.emit('err', { code: 'ROOM_NOT_FOUND', message: 'Room not found or already started.' });
-      if (r.players[0] && r.players[0].team.id === socket.data.team.id) return socket.emit('err', { code: 'SAME_TEAM', message: 'You cannot play against your own team.' });
-      if (r.players[0] && r.players[1]) return socket.emit('err', { code: 'ROOM_FULL', message: 'Room is full.' });
-      const i = seat(r, socket); r.players.forEach(p => { if (p) p.ready = false; });
-      socket.emit('joined', { you: i, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
+      const i = seat(r, socket);      // joins his own team's side as the 2nd member (only registered members of that team can), or the free opposing side
+      if (i < 0) return socket.emit('err', { code: 'ROOM_FULL', message: 'This room is full (or your team already has 2 players in it).' });
+      r.players.forEach(sd => { if (sd) sd.members.forEach(m => { m.ready = false; }); });
+      socket.emit('joined', { you: i, uid: u.id, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
     }));
     socket.on('leave', wrap(() => leaveLobby(socket)));
     socket.on('ready', wrap(() => {
       const r = room(); if (!r || r.phase !== 'lobby' || !r.players[0] || !r.players[1]) return;
-      r.players[idxOf(r, u.id)].ready = true; lobbyUpdate(r);
-      if (r.players.every(p => p.ready)) startMatch(r).catch(e => console.error('[aurex-pen] start failed:', e));
+      memberOf(r, u.id).ready = true; lobbyUpdate(r);
+      if (r.players.every(sd => sd.members.every(m => m.ready))) startMatch(r).catch(e => console.error('[aurex-pen] start failed:', e));
     }));
-    socket.on('shoot', wrap(d => { const r = room(); if (r) onShoot(r, idxOf(r, u.id), d || {}); }));
-    socket.on('feint', wrap(() => { const r = room(); if (r) onFeint(r, idxOf(r, u.id)); }));
+    socket.on('shoot', wrap(d => { const r = room(); if (r) onShoot(r, u.id, d || {}); }));
+    socket.on('feint', wrap(() => { const r = room(); if (r) onFeint(r, u.id); }));
     socket.on('kin', wrap(d => {
-      const r = room(); if (!r || !r.turn) return; const i = idxOf(r, u.id); if (i !== r.turn.keeper) return;
-      const p = r.players[i], tn = now(); if (p.lastKin && tn - p.lastKin < 15) return; p.lastKin = tn;   // flood guard
+      const r = room(); if (!r || !r.turn || r.turn.keeperUser !== u.id) return;
+      const p = r.players[r.turn.keeper], tn = now(); if (p.lastKin && tn - p.lastKin < 15) return; p.lastKin = tn;   // flood guard
       p.inp = { mx: sgn(num(d && d.mx)), mz: sgn(num(d && d.mz)) };
     }));
-    socket.on('dive', wrap(d => { const r = room(); if (r) onDive(r, idxOf(r, u.id), d || {}); }));
+    socket.on('dive', wrap(d => { const r = room(); if (r) onDive(r, u.id, d || {}); }));
     socket.on('disconnect', wrap(() => {
       if (userSocket.get(u.id) === socket) userSocket.delete(u.id);
       queue = queue.filter(q => q.userId !== u.id);
       if (socket.data.replaced) return;
       const r = room(); if (!r) return;
-      const i = idxOf(r, u.id), p = r.players[i]; if (!p) return;
-      p.on = false;
+      const i = idxOf(r, u.id), mem = memberOf(r, u.id); if (!mem) return;
+      mem.on = false;
       if (r.phase === 'lobby') { leaveLobby(socket); return; }
       if (r.ended) return;
       emit(r, 'room', { room: roomView(r) });
-      if (r.sh) startForfeitTimer(r, i);
+      if (r.sh) { if (!sideOn(r.players[i])) startForfeitTimer(r, i); }       // a teammate still online keeps the team in the match
       else { r.phase = 'lobby'; leaveLobby(socket); }
     }));
   });

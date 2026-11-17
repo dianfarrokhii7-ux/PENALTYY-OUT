@@ -106,3 +106,4 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
 .spin{width:54px;height:54px;border-radius:50%;border:4px solid rgba(203,211,225,.25);border-top-color:var(--gold);animation:sp 1s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
 .bigscore{font:800 min(22vw,110px)/1 var(--head);letter-spacing:.06em}.tagline{margin:0;padding:4px 14px;border-radius:99px;font:700 13px var(--head);letter-spacing:.1em;border:1px solid rgba(203,211,225,.4)}.tagline.league{background:var(--good);color:#06210f}
 #fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .5s;z-index:30}#fade.on{opacity:1}
+.pcard .mute{font-size:11px;opacity:.7;margin-top:2px}

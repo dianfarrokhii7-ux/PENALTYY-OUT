@@ -8,7 +8,7 @@ if (!window.AurexPenPhysics || !window.PenGfx) { fatal('A game file failed to lo
 if (!window.io) { fatal('Could not reach the game server connection (socket.io). Reload the page.'); return; }
 const P = window.AurexPenPhysics, C = P.C, Gfx = window.PenGfx;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-let sock = null, off = 0, me = -1, room = null, players = [], league = false, phase = 'menu', turn = null, role = 'none', st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: 0 }, cards = [0, 0];
+let sock = null, off = 0, me = -1, uid = -1, actorList = [], room = null, players = [], league = false, phase = 'menu', turn = null, role = 'none', st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: 0 }, cards = [0, 0];
 let aim = { ax: 0, ay: 0.4, curve: 0 }, charging = false, chargeT0 = 0, power = 0, sent = false, ballAll = [], strikeAt = 0, shotClockTimer = null, timers = [], lastKin = '0,0', runInfo = null, started = false, sbReady = false, myTeam = null;
 const keys = new Set(), srv = () => Date.now() + off, later = (ms, fn) => { const t = setTimeout(fn, Math.max(0, ms)); timers.push(t); return t; };
 const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
@@ -51,7 +51,7 @@ function dotsFor(side) {
 }
 function renderBoard() {
   if (!players.length) return;
-  players.forEach((p, i) => { text('tn' + i, p.team.name); text('pn' + i, p.username + (i === me ? ' (YOU)' : '')); const im = $('cr' + i); if (im.getAttribute('src') !== crest(p.team)) im.src = crest(p.team); text('sc' + i, st.goals[i]); dotsFor(i); $('nm' + i).classList.toggle('act', !!turn && turn.shooter === i); });
+  players.forEach((p, i) => { text('tn' + i, p.team.name); text('pn' + i, p.members.map(m => m.username + (m.userId === uid ? ' (YOU)' : '')).join(' & ')); const im = $('cr' + i); if (im.getAttribute('src') !== crest(p.team)) im.src = crest(p.team); text('sc' + i, st.goals[i]); dotsFor(i); $('nm' + i).classList.toggle('act', !!turn && turn.shooter === i); });
   const mt = $('modeTag'); mt.textContent = league ? 'LEAGUE MATCH' : 'FRIENDLY · NOT COUNTED IN THE TABLE'; mt.classList.toggle('league', league);
   let label = 'PENALTIES';
   if (turn) { const k = st.kicks[turn.shooter] + 1; label = k > 5 ? `SUDDEN DEATH · ${k - 5}/5` : `KICK ${k} / 5`; if (turn.retake) label = 'RETAKE'; }
@@ -71,7 +71,8 @@ function roleText() {
   if (!turn) return '';
   const k = turn.retake ? ' <b>(retake)</b>' : '';
   if (role === 'shooter') return `<b>YOU SHOOT</b>${k} — aim with the mouse / finger, hold <b>SPACE</b> to charge, release to shoot. <b>Q / E</b> curve · <b>F</b> feint (early in the run-up only).`;
-  return `<b>YOU ARE THE GOALKEEPER</b>${k} — <b>A / D</b> move, <b>W</b> steps off the line (VAR watches!), dive: <b>← →</b> low · <b>Q / E</b> high · <b>↑</b> jump.`;
+  if (role === 'keeper') return `<b>YOU ARE THE GOALKEEPER</b>${k} — <b>A / D</b> move, <b>W</b> steps off the line (VAR watches!), dive: <b>← →</b> low · <b>Q / E</b> high · <b>↑</b> jump.`;
+  return `<b>${esc(turn.shooterName || '')}</b> shoots against <b>${esc(turn.keeperName || '')}</b>${k} — your turn comes next, watch the kick.`;
 }
 
 /* ------------------------------------------------------------------ VAR overlay */
@@ -110,10 +111,21 @@ function setScreen(id) { ['scrBoot', 'scrHome', 'scrQueue', 'scrLobby', 'scrEnd'
 function lobbyUI(r) {
   room = r; players = r.players.filter(Boolean);
   text('roomCode', r.code);
-  [0, 1].forEach(i => { const p = r.players[i], el = $('lp' + i); if (!p) { el.className = 'pcard off'; el.innerHTML = '<span>Waiting for opponent…</span>'; return; } el.className = 'pcard' + (p.ready ? ' ready' : '') + (p.on ? '' : ' off'); el.innerHTML = `<img alt="" src="${crest(p.team)}"><b>${esc(p.team.name)}</b><span>${esc(p.username)}${i === me ? ' (you)' : ''}</span><span>${p.ready ? '✔ READY' : 'not ready'}</span>`; });
-  const both = r.players[0] && r.players[1]; $('bReady').disabled = !both || (r.players[me] && r.players[me].ready);
-  text('lobbyMsg', both ? 'Opponent found. Press Ready.' : 'Share this code with the opponent (a player from another AUREX team).');
+  [0, 1].forEach(i => {
+    const sd = r.players[i], el = $('lp' + i);
+    if (!sd) { el.className = 'pcard off'; el.innerHTML = '<span>Waiting for opponent…</span>'; return; }
+    const all = sd.members.length && sd.members.every(m => m.ready);
+    el.className = 'pcard' + (all ? ' ready' : '') + (sd.on ? '' : ' off');
+    el.innerHTML = `<img alt="" src="${crest(sd.team)}"><b>${esc(sd.team.name)}</b>` + sd.members.map(m => `<span>${m.ready ? '✔' : '•'} ${esc(m.username)}${m.userId === uid ? ' (you)' : ''}</span>`).join('') + (sd.members.length < 2 && i === me ? '<span class="mute">+ your teammate can join with the code</span>' : '');
+  });
+  const both = r.players[0] && r.players[1], mine = r.players[me] && r.players[me].members.find(m => m.userId === uid);
+  $('bReady').disabled = !both || !mine || mine.ready;
+  text('lobbyMsg', both ? 'Opponent found. Every player in the room must press Ready.' : 'Share this code: the opponent (another team) or your registered teammate can join.');
+  text('modeNote', both ? `${r.players[0].members.length} + ${r.players[1].members.length} players · kicks rotate between teammates` : '');
 }
+function buildActors() { actorList = []; players.forEach((sd, i) => sd.members.forEach(m => actorList.push({ username: m.username, team: sd.team, side: i, userId: m.userId }))); }
+const actorOf = userId => Math.max(0, actorList.findIndex(a => a.userId === userId));
+const names = sd => sd.members.map(m => m.username).join(' & ');
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function connect() {
@@ -121,10 +133,10 @@ function connect() {
   sock.on('connect_error', e => { text('bootMsg', e && /AUTH/.test(e.message) ? 'Please sign in to AUREX first.' : 'Connection problem: ' + (e && e.message)); if (e && /AUTH/.test(e.message)) { $('bootLink').hidden = false; sock.close(); } });
   sock.on('connect', () => { text('conn', ''); syncClock(); });
   sock.on('disconnect', () => { if (phase !== 'end' && phase !== 'menu') text('conn', 'Connection lost — reconnecting… (you have 60 s)'); });
-  sock.on('hello', d => { myTeam = d.team; setScreen('scrHome'); if (d.team) { text('myTeamName', d.team.name); text('myPlayer', d.user.username); $('myCrest').src = crest(d.team); } else { text('myTeamName', 'No active team'); text('myPlayer', d.user.username); } text('homeErr', d.error || ''); ['bQuick', 'bCreate', 'bJoin'].forEach(b => { $(b).disabled = !!d.error; }); });
+  sock.on('hello', d => { myTeam = d.team; uid = d.user.id; setScreen('scrHome'); if (d.team) { text('myTeamName', d.team.name); text('myPlayer', d.user.username); $('myCrest').src = crest(d.team); } else { text('myTeamName', 'No active team'); text('myPlayer', d.user.username); } text('homeErr', d.error || ''); ['bQuick', 'bCreate', 'bJoin'].forEach(b => { $(b).disabled = !!d.error; }); });
   sock.on('err', d => { text('homeErr', d.message || d.code); if (d.code === 'OPENED_ELSEWHERE') { text('conn', d.message); } });
   sock.on('queue', () => setScreen('scrQueue'));
-  sock.on('joined', d => { me = d.you; setScreen('scrLobby'); lobbyUI(d.room); });
+  sock.on('joined', d => { me = d.you; if (d.uid != null) uid = d.uid; setScreen('scrLobby'); lobbyUI(d.room); });
   sock.on('lobby', d => { if (phase === 'menu') lobbyUI(d.room); });
   sock.on('room', d => { room = d.room; if (!started) return; const off2 = d.room.players.findIndex(p => p && !p.on); text('conn', off2 >= 0 ? (off2 === me ? '' : 'Opponent disconnected — waiting up to 60 s for them to return…') : ''); });
   sock.on('match:start', onMatchStart);
@@ -151,10 +163,11 @@ function applyScore(d) { if (d.kicks) { st = { kicks: d.kicks, goals: d.goals, l
 function onMatchStart(d) {
   started = true; league = d.league; players = d.players; phase = 'intro';
   st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: d.first }; $('menu').classList.add('off'); show('hud', true); show('pad', false); Snd.unlock(); Snd.ambience();
-  try { initGfx(); Gfx.setActors(players); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('leave'); return; }
+  buildActors();
+  try { initGfx(); Gfx.setActors(actorList); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('leave'); return; }
   Gfx.setClock(srv); renderBoard(); text('role', ''); text('hint', ''); show('runbar', false); show('power', false); show('curveui', false);
   Gfx.startIntro(srv(), d.introMs); Gfx.crowdCheer(true); Snd.roar(true);
-  players.forEach((p, i) => { text('itn' + i, p.team.name); text('ipn' + i, p.username); $('icr' + i).src = crest(p.team); });
+  players.forEach((p, i) => { text('itn' + i, p.team.name); text('ipn' + i, names(p)); $('icr' + i).src = crest(p.team); });
   const it = $('intro'); it.className = ''; show('intro', true); const first = players[d.first];
   text('coin', `COIN TOSS · ${first.team.name.toUpperCase()} KICKS FIRST`); const nIn = Math.min(2600, d.introMs * 0.28), tOut = d.introMs * 0.66;
   later(nIn, () => it.classList.add('names-in')); later(tOut, () => { it.classList.add('names-out'); it.classList.add('title-in'); show('hud', false); Snd.roar(false); }); later(d.introMs - 200, () => { $('fade').classList.add('on'); }); later(d.introMs + 150, () => { show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); });
@@ -168,24 +181,24 @@ function safeLoop() { try { Gfx.render(); } catch (e) { if (!safeLoop.warned) { 
 function loop() { safeLoop(); tickClock(); inputFrame(); requestAnimationFrame(loop); }
 
 function onSync(d) {
-  started = true; me = d.you; league = d.league; players = d.room.players.filter(Boolean); st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first }; cards = d.cards || [0, 0];
-  $('menu').classList.add('off'); show('hud', true); initGfx(); Gfx.setActors(players); Gfx.setClock(srv); renderBoard(); text('conn', '');
+  started = true; me = d.you; if (d.uid != null) uid = d.uid; league = d.league; players = d.room.players.filter(Boolean); st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first }; cards = d.cards || [0, 0];
+  $('menu').classList.add('off'); show('hud', true); buildActors(); initGfx(); Gfx.setActors(actorList); Gfx.setClock(srv); renderBoard(); text('conn', '');
   if (d.turn && d.phase === 'aim') onTurn({ ...d.turn, ...d, k: d.turn.k }); else { phase = d.phase; Gfx.camera('result', true); text('hint', 'Reconnected — next kick coming up…'); }
 }
 
 function onTurn(d) {
-  clearLater(); show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); turn = d; phase = 'aim'; started = true; role = d.shooter === me ? 'shooter' : 'keeper'; sent = false; charging = false; power = 0; aim = { ax: 0, ay: 0.4, curve: 0 }; ballAll = []; runInfo = null; lastKin = '0,0';
+  clearLater(); show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); turn = d; phase = 'aim'; started = true; role = d.shooterUser === uid ? 'shooter' : d.keeperUser === uid ? 'keeper' : 'spectator'; sent = false; charging = false; power = 0; aim = { ax: 0, ay: 0.4, curve: 0 }; ballAll = []; runInfo = null; lastKin = '0,0';
   applyScore(d); show('var', false); show('callbox', false); $('banner').classList.remove('show'); show('runbar', false);
-  Gfx.clearTurn(); Gfx.setRole(role, d.shooter, d.keeper); Gfx.keeperSnap(0, 0); Gfx.camera(role === 'shooter' ? 'shooter' : 'keeper', true);
+  Gfx.clearTurn(); Gfx.setRole(role, actorOf(d.shooterUser), actorOf(d.keeperUser)); Gfx.keeperSnap(0, 0); Gfx.camera(role === 'keeper' ? 'keeper' : 'shooter', true);
   Gfx.setAim(aim.ax, aim.ay, 0, role === 'shooter', 0); Gfx.crowdCheer(false);
   $('role').innerHTML = roleText(); show('power', role === 'shooter'); show('curveui', role === 'shooter'); $('power').firstElementChild.style.width = '0%'; updateCurveUI();
-  show('padShoot', role === 'shooter'); show('padKeep', role === 'keeper'); show('pad', true);
-  text('hint', role === 'shooter' ? 'Wait for the whistle…' : 'Position yourself on the line — wait for the whistle');
+  show('padShoot', role === 'shooter'); show('padKeep', role === 'keeper'); show('pad', role !== 'spectator');
+  text('hint', role === 'shooter' ? 'Wait for the whistle…' : role === 'keeper' ? 'Position yourself on the line — wait for the whistle' : 'Your teammate or opponent is on — watch and get ready');
   if (d.retake) banner('RETAKE', '#ffd23f', 1400);
   later(d.whistleAt - srv(), () => { if (phase === 'aim') { Snd.whistle(); Gfx.refSignal('whistle'); text('hint', role === 'shooter' ? 'WHISTLE — you can shoot!' : 'WHISTLE — the kicker is about to shoot'); } });
 }
 function onKick(d) {
-  phase = 'flight'; strikeAt = d.strikeAt; Gfx.setStrike(d.strikeAt); Gfx.camera(role === 'shooter' ? 'flightS' : 'flightK'); show('runbar', false); show('power', false); text('hint', '');
+  phase = 'flight'; strikeAt = d.strikeAt; Gfx.setStrike(d.strikeAt); Gfx.camera(role === 'keeper' ? 'flightK' : 'flightS'); show('runbar', false); show('power', false); text('hint', '');
   Gfx.keeperTo(d.keeper.x, d.keeper.kz); later(d.strikeAt - srv(), () => { Snd.kick(); }); Gfx.shake(0.02);
 }
 function onBall(d) {
@@ -197,16 +210,16 @@ function onBall(d) {
 }
 function onResult(d) {
   phase = 'result'; applyScore(d); show('power', false); show('runbar', false); Gfx.setAim(0, 0, 0, false, 0); Gfx.camera('result'); show('padShoot', false); show('padKeep', false);
-  const sName = players[d.shooter].username, kName = players[d.keeper].username, final = d.final;
+  const sName = d.shooterName || players[d.shooter].team.name, kName = d.keeperName || players[d.keeper].team.name, final = d.final, sa = actorOf(d.shooterUser), ka = actorOf(d.keeperUser);
   const verdict = d.var ? d.var.verdict : null; if (verdict) varVerdict(verdict, final === 'goal' || final === 'save' ? true : false);
   if (d.call) { text('callHead', d.call.headline); text('callDetail', d.call.detail); show('callbox', true); later(3600, () => show('callbox', false)); }
   (d.cards || []).forEach((c, i) => later(500 + i * 1700, () => flashCard(c.who, c.who === 'shooter' ? sName : kName)));
   const sub = verdict ? `<small>VAR · ${esc(verdict.headline)}</small>` : '';
-  if (final === 'retake') { banner('RETAKE' + sub, '#ffd23f', 2400); Gfx.react('retake', d.shooter, d.keeper); return; }
-  if (final === 'goal') { banner('GOAL!' + sub, '#41e0a0', 2600); Gfx.react('goal', d.shooter, d.keeper); Gfx.crowdCheer(true); Snd.roar(true); later(900, () => { const rs = ballAll.filter(Boolean); if (rs.length > 8) { banner('REPLAY', '#cbd3e1', 2600); Gfx.startReplay(rs, 0.3, 'goalcam'); } }); }
-  else if (final === 'save') { banner('SAVED!' + sub, '#5b95ff', 2400); Gfx.react('save', d.shooter, d.keeper); Snd.roar(false); }
-  else if (final === 'post') { banner('OFF THE POST!' + sub, '#ffd23f', 2400); Gfx.react('miss', d.shooter, d.keeper); Snd.roar(false); }
-  else { banner((d.timeout ? 'TOO SLOW!' : 'MISSED!') + sub, '#ff6b86', 2400); Gfx.react('miss', d.shooter, d.keeper); }
+  if (final === 'retake') { banner('RETAKE' + sub, '#ffd23f', 2400); Gfx.react('retake', sa, ka); return; }
+  if (final === 'goal') { banner('GOAL!' + sub, '#41e0a0', 2600); Gfx.react('goal', sa, ka); Gfx.crowdCheer(true); Snd.roar(true); later(900, () => { const rs = ballAll.filter(Boolean); if (rs.length > 8) { banner('REPLAY', '#cbd3e1', 2600); Gfx.startReplay(rs, 0.3, 'goalcam'); } }); }
+  else if (final === 'save') { banner('SAVED!' + sub, '#5b95ff', 2400); Gfx.react('save', sa, ka); Snd.roar(false); }
+  else if (final === 'post') { banner('OFF THE POST!' + sub, '#ffd23f', 2400); Gfx.react('miss', sa, ka); Snd.roar(false); }
+  else { banner((d.timeout ? 'TOO SLOW!' : 'MISSED!') + sub, '#ff6b86', 2400); Gfx.react('miss', sa, ka); }
   text('hint', '');
 }
 function onEnd(d) {
@@ -216,7 +229,7 @@ function onEnd(d) {
   const mt = $('endMode'); mt.textContent = d.league ? 'LEAGUE MATCH — recorded in the AUREX table' : 'FRIENDLY — not counted in the table (the league has not started)'; mt.className = 'tagline' + (d.league ? ' league' : '');
   const why = { normal: 'Won after the regular five kicks.', sudden_death: 'Won in sudden death.', cap_draw: 'Level after 10 kicks each — the match is a draw.', forfeit: d.winner === me ? 'Your opponent left the match — 3–0 awarded.' : 'You left the match — 3–0 awarded to your opponent.' }[d.reason] || '';
   text('endWhy', why + (d.saved ? '' : '  (Warning: the result could not be saved — tell the owner.)'));
-  if (!draw) { Gfx.react('goal', d.winner, 1 - d.winner); Snd.roar(true); Gfx.crowdCheer(true); }
+  if (!draw) { Gfx.react('goal', Math.max(0, actorList.findIndex(a => a.side === d.winner)), Math.max(0, actorList.findIndex(a => a.side !== d.winner))); Snd.roar(true); Gfx.crowdCheer(true); }
   later(2600, () => { setScreen('scrEnd'); });
 }
 
