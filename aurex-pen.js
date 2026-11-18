@@ -295,6 +295,21 @@ function bindUI() {
   $('bLeave').onclick = () => { sock.emit('leave'); setScreen('scrHome'); me = -1; };
   $('bReady').onclick = () => { Snd.unlock(); sock.emit('ready'); $('bReady').disabled = true; };
   addEventListener('contextmenu', e => e.preventDefault());
+  bindFullscreen();
+}
+function bindFullscreen() {
+  const b = $('fsBtn'), root = document.documentElement;
+  const req = root.requestFullscreen || root.webkitRequestFullscreen, exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!b || !req || !exit) return;                       // e.g. iPhone Safari: no element fullscreen, keep the button hidden
+  const isFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  const sync = () => { b.classList.toggle('on', isFs()); const t = isFs() ? 'Exit fullscreen' : 'Fullscreen'; b.title = t; b.setAttribute('aria-label', t); };
+  b.hidden = false;
+  b.addEventListener('pointerdown', e => e.stopPropagation());   // never leaks into aiming / shooting
+  b.addEventListener('click', e => {
+    e.preventDefault(); b.blur();                         // blur: SPACE (shoot) must not re-trigger the button
+    try { const r = isFs() ? exit.call(document) : req.call(root); if (r && r.catch) r.catch(() => { }); } catch (_) { }
+  });
+  document.addEventListener('fullscreenchange', sync); document.addEventListener('webkitfullscreenchange', sync); sync();
 }
 bindUI(); connect();
 window.__pen = { get state() { return { phase, role, me, st, turn, league }; } };    // handy for debugging

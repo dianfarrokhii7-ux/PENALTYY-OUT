@@ -60,6 +60,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
 #padKeep .mv,#padKeep .dv{display:flex;flex-direction:column;align-items:center;gap:6px}#padKeep .mv>div{display:flex;gap:6px}
 #padKeep .dv{display:grid;grid-template-columns:repeat(3,54px);gap:6px}#padKeep .dv button:nth-child(4){grid-column:1}#padKeep .dv button:nth-child(5){grid-column:3}
 @media (pointer:fine){#pad{display:none!important}}
+/* fullscreen toggle: sits with the on-screen controls (right edge, just above the pad; bottom-right on desktop) */
+#fsBtn{position:absolute;right:max(10px,env(safe-area-inset-right));bottom:calc(max(8px,env(safe-area-inset-bottom)) + 122px);width:42px;height:42px;padding:0;display:flex;align-items:center;justify-content:center;pointer-events:auto;touch-action:manipulation;border:1px solid rgba(255,255,255,.4);border-radius:12px;background:rgba(7,16,42,.7);backdrop-filter:blur(3px);cursor:pointer;-webkit-tap-highlight-color:transparent}
+#fsBtn[hidden]{display:none}
+#fsBtn svg{width:22px;height:22px;fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+#fsBtn .i-exit,#fsBtn.on .i-enter{display:none}#fsBtn.on .i-exit{display:block}
+#fsBtn:active{background:rgba(45,107,255,.8)}
+@media (pointer:fine){#fsBtn{bottom:max(14px,env(safe-area-inset-bottom))}}
+#hud:not(:has(#pad:not(.hide))) #fsBtn{bottom:max(14px,env(safe-area-inset-bottom))}
 /* ---- VAR */
 #var{position:absolute;right:max(12px,env(safe-area-inset-right));top:calc(var(--w)*.4 + 30px);width:min(92vw,420px);padding:12px;border-radius:12px;background:rgba(4,9,22,.9);border:1px solid var(--gold);z-index:8;animation:slide .35s ease-out;pointer-events:none;box-shadow:0 0 40px rgba(245,200,74,.25)}
 @media (max-width:760px){#var{left:50%;right:auto;transform:translateX(-50%);animation:none}}
