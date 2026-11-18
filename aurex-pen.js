@@ -66,7 +66,13 @@ function tickClock() {
 /* ------------------------------------------------------------------ banners / overlays */
 let bannerT = 0;
 function banner(html, color, ms) { const b = $('banner'); b.innerHTML = html; b.style.color = color || '#fff'; b.classList.add('show'); clearTimeout(bannerT); bannerT = setTimeout(() => b.classList.remove('show'), ms || 2200); }
-function flashCard(who, name) { text('cardText', `YELLOW CARD · ${String(name).toUpperCase()}`); show('cardflash', true); Snd.card(); Gfx.refSignal('card'); later(2200, () => show('cardflash', false)); }
+let cardT = [];     // own timers: onTurn()'s clearLater() must not be able to leave a card stuck on screen
+function hideCard() { cardT.forEach(clearTimeout); cardT = []; const c = $('cardflash'); c.classList.remove('out'); c.classList.add('hide'); }
+function flashCard(who, name) {
+  cardT.forEach(clearTimeout); cardT = []; const c = $('cardflash'); c.classList.remove('out');
+  text('cardText', `YELLOW CARD · ${String(name).toUpperCase()}`); show('cardflash', true); Snd.card(); Gfx.refSignal('card');
+  cardT.push(setTimeout(() => c.classList.add('out'), 1900), setTimeout(hideCard, 2300));   // fade out, then gone
+}
 function roleText() {
   if (!turn) return '';
   const k = turn.retake ? ' <b>(retake)</b>' : '';
@@ -188,7 +194,7 @@ function onSync(d) {
 }
 
 function onTurn(d) {
-  clearLater(); show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); turn = d; phase = 'aim'; started = true; role = d.shooterUser === uid ? 'shooter' : d.keeperUser === uid ? 'keeper' : 'spectator'; sent = false; charging = false; power = 0; aim = { ax: 0, ay: 0.4, curve: 0 }; ballAll = []; runInfo = null; lastKin = '0,0';
+  clearLater(); hideCard(); show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); turn = d; phase = 'aim'; started = true; role = d.shooterUser === uid ? 'shooter' : d.keeperUser === uid ? 'keeper' : 'spectator'; sent = false; charging = false; power = 0; aim = { ax: 0, ay: 0.4, curve: 0 }; ballAll = []; runInfo = null; lastKin = '0,0';
   applyScore(d); show('var', false); show('callbox', false); $('banner').classList.remove('show'); show('runbar', false);
   Gfx.clearTurn(); Gfx.setRole(role, actorOf(d.shooterUser), actorOf(d.keeperUser)); Gfx.keeperSnap(0, 0); Gfx.camera(role === 'keeper' ? 'keeper' : 'shooter', true);
   Gfx.setAim(aim.ax, aim.ay, 0, role === 'shooter', 0); Gfx.crowdCheer(false);
@@ -224,7 +230,7 @@ function onResult(d) {
   text('hint', '');
 }
 function onEnd(d) {
-  phase = 'end'; clearLater(); show('var', false); show('callbox', false); show('pad', false); text('role', ''); text('hint', ''); text('conn', ''); applyScore(d); Gfx.setAim(0, 0, 0, false, 0); Gfx.camera('end');
+  phase = 'end'; clearLater(); hideCard(); show('var', false); show('callbox', false); show('pad', false); text('role', ''); text('hint', ''); text('conn', ''); applyScore(d); Gfx.setAim(0, 0, 0, false, 0); Gfx.camera('end');
   const win = d.winner === me, draw = d.winner == null; text('endTitle', draw ? 'DRAW' : win ? 'VICTORY' : 'DEFEAT'); text('endScore', `${d.table[0]} – ${d.table[1]}`);
   text('endTeams', `${players[0].team.name}  vs  ${players[1].team.name}`);
   const mt = $('endMode'); mt.textContent = d.league ? 'LEAGUE MATCH — recorded in the AUREX table' : 'FRIENDLY — not counted in the table (the league has not started)'; mt.className = 'tagline' + (d.league ? ' league' : '');

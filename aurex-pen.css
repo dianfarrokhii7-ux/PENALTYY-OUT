@@ -81,6 +81,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
 #varVerdict.good{background:rgba(65,224,160,.16);border-color:var(--good)}#varVerdict.bad{background:rgba(255,84,112,.16);border-color:var(--bad)}
 #callbox{position:absolute;left:50%;top:calc(var(--w)*.4 + 40px);transform:translateX(-50%);width:min(92vw,520px);padding:10px 14px;border-radius:10px;background:rgba(4,9,22,.9);border:1px solid var(--bad);text-align:center;z-index:8}#callbox b{display:block;font:800 18px var(--head);letter-spacing:.03em}#callbox span{font-size:13px;color:#d6e2ff}
 #cardflash{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:14px;z-index:9;animation:cardin .5s cubic-bezier(.2,1.5,.4,1)}#cardflash i{width:58px;height:82px;background:#ffd23f;border-radius:5px;box-shadow:0 0 30px #ffd23f;transform:rotate(-8deg)}#cardflash b{font:800 30px var(--head);letter-spacing:.05em;text-shadow:0 3px 16px #000}
+#cardflash{transition:opacity .4s}#cardflash.out{opacity:0}
 @keyframes cardin{from{transform:translate(-50%,-50%) scale(.2);opacity:0}}
 /* ---- intro */
 #intro{position:fixed;inset:0;z-index:6;pointer-events:none}
@@ -191,6 +192,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
   #padShoot [data-k=Feint]{width:70px;font-size:11px}
   #padKeep .dv{grid-template-columns:repeat(3,50px)}
 }
+/* mobile: no instruction text under the screen (it sat right in front of the touch pad) */
+@media (max-width:760px),(max-height:520px),(pointer:coarse){#role,#hint{display:none!important}}
 @media (max-height:520px) and (pointer:coarse){
   #hud:has(#pad:not(.hide)){--base:max(10px,env(safe-area-inset-bottom))}
   #stack{width:clamp(200px,calc(100vw - 440px),420px)}#runbar,#power{width:100%}#curveui>div{width:80px}
