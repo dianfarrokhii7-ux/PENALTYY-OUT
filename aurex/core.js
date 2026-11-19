@@ -4,6 +4,7 @@ const C = require('./crypto');
 const V = require('./validate');
 const { err } = require('./errors');
 const Rules = require('./pen-rules');
+const nodeCrypto = require('crypto');
 
 const SESSION_MS = 30 * 24 * 3600 * 1000;
 const MIN = 60e3, HOUR = 3600e3;
@@ -179,13 +180,72 @@ function createCore({ store, env = process.env }) {
     return team?{teamId:team.id,club:await store.getClubSelection(team.id)}:null;
   }
 
-  // ---------- AUREX penalty cup: league switch, table, results ----------
-  async function penCup() {
-    const [league, teams, lm, recent] = await Promise.all([store.getPenLeague(), store.listTeams(), store.allLeaguePenMatches(), store.listPenMatches({ limit: 25 })]);
-    const shown = teams.filter(t => ['approved', 'active', 'suspended'].includes(t.status));
-    const standings = Rules.computeStandings(shown.map(t => ({ id: t.id, name: t.name, teamCode: t.teamCode, hasLogo: t.hasLogo })), lm);
-    return { league: { started: league.started, startedAt: league.startedAt }, standings,
-      recent: recent.map(m => ({ id: m.id, teamA: m.teamAName, teamB: m.teamBName, teamAId: m.teamA, teamBId: m.teamB, playerA: m.playerAName, playerB: m.playerBName, goalsA: m.goalsA, goalsB: m.goalsB, result: m.result, reason: m.reason, league: !!m.league, varCount: m.varCount || 0, finishedAt: m.finishedAt })) };
+  // ---------- AUREX penalty league: schedule, table, play-offs ----------
+  const CUP_TEAM_OK = ['approved', 'active', 'suspended'];
+  const teamLite = t => (t ? { id: t.id, name: t.name, teamCode: t.teamCode || null, hasLogo: !!t.hasLogo } : null);
+  const parseWhen = v => {
+    if (v == null || v === '') return null;
+    const d = typeof v === 'string' ? new Date(v) : null;
+    if (!d || isNaN(+d) || d.getFullYear() < 2020 || d.getFullYear() > 2100) throw err(400, 'INVALID_TIME', 'Pick a valid date and time.', { field: 'scheduledAt' });
+    return d.toISOString();
+  };
+  async function rankLeague(L) {                       // final league ranking of the teams that entered the league
+    const teams = await store.listTeams(), byId = new Map(teams.map(t => [t.id, t]));
+    const rows = Rules.computeStandings((L.teams || []).map(id => byId.get(id)).filter(Boolean).map(teamLite), await store.allLeaguePenMatches());
+    return { rows, byId, ranked: rows.map(r => r.teamId), rankOf: new Map(rows.map(r => [r.teamId, r.rank])) };
+  }
+  async function addFixture(stage, a, b, when) {
+    for (let i = 0; i < 25; i++) {
+      const r = await store.createPenFixture({ stage, teamA: a, teamB: b, scheduledAt: when, roomCode: Rules.makeFixtureCode() });
+      if (r.kind !== 'DUP_CODE') return r;
+    }
+    throw err(500, 'CODE_FAILED', 'Could not pick a free room code. Try again.');
+  }
+  /** Moves the league forward after every result: round robin done -> play-offs (or champion) -> final -> champion. Idempotent and serialised. */
+  async function doAdvance() {
+    const L = await store.getPenLeague(); if (L.phase !== 'league' && L.phase !== 'playoffs') return L;
+    const n = (L.teams || []).length; if (!Rules.LEAGUE_SIZES.includes(n)) return L;
+    const fx = await store.listPenFixtures();
+    if (L.phase === 'league') {
+      const lf = fx.filter(f => f.stage === 'league');
+      if (lf.length < Rules.leagueMatchCount(n) || lf.some(f => !f.matchId)) return L;
+      const { ranked } = await rankLeague(L);
+      if (n === 4) { await store.setPenLeaguePhase('finished', ranked[0]); return store.getPenLeague(); }
+      for (const [a, b] of Rules.semiPairs(ranked)) await addFixture('semi', a, b, null);
+      await store.setPenLeaguePhase('playoffs'); return store.getPenLeague();
+    }
+    const { ranked, rankOf } = await rankLeague(L), semis = fx.filter(f => f.stage === 'semi'), fin = fx.find(f => f.stage === 'final');
+    const win = f => Rules.knockoutWinner(f.teamA, f.teamB, f.winnerTeam, rankOf);
+    if (fin) { if (fin.matchId) await store.setPenLeaguePhase('finished', win(fin)); }
+    else if (semis.length === Rules.semiPairs(ranked).length && semis.every(f => f.matchId)) {
+      const order = Rules.semiPairs(ranked).map(([a, b]) => semis.find(f => Rules.pairKey(f.teamA, f.teamB) === Rules.pairKey(a, b)));
+      const [a, b] = Rules.finalPair(ranked, order.map(win)); await addFixture('final', a, b, null);
+    }
+    return store.getPenLeague();
+  }
+  let advChain = Promise.resolve();
+  const penAdvance = () => { const run = advChain.then(doAdvance); advChain = run.catch(() => { }); return run; };
+
+  async function penCup(viewer) {
+    const [league, teams, lm, recent, fixtures] = await Promise.all([store.getPenLeague(), store.listTeams(), store.allLeaguePenMatches(), store.listPenMatches({ limit: 25 }), store.listPenFixtures()]);
+    const byId = new Map(teams.map(t => [t.id, t]));
+    const entered = league.started && league.teams ? league.teams.map(id => byId.get(id)).filter(Boolean) : null;
+    const shown = entered || teams.filter(t => CUP_TEAM_OK.includes(t.status));
+    const standings = Rules.computeStandings(shown.map(teamLite), lm), rankOf = new Map(standings.map(r => [r.teamId, r.rank]));
+    let myTeamId = null; if (viewer) { const mt = await store.getActiveTeamForUser(viewer.id); myTeamId = mt ? mt.id : null; }
+    const isOwner = !!viewer && viewer.role === 'OWNER', nowMs = Date.now();
+    const fxView = fixtures.map(f => {
+      const mine = myTeamId != null && (f.teamA === myTeamId || f.teamB === myTeamId), when = f.scheduledAt ? +new Date(f.scheduledAt) : null, m = f.match;
+      const flip = m && m.teamA !== f.teamA;                                   // the stored match may list the sides the other way round
+      const score = m ? { a: flip ? m.goalsB : m.goalsA, b: flip ? m.goalsA : m.goalsB, reason: m.reason } : null;
+      const winnerTeamId = !f.matchId ? null : f.stage === 'league' ? f.winnerTeam : Rules.knockoutWinner(f.teamA, f.teamB, f.winnerTeam, rankOf);
+      return { id: f.id, stage: f.stage, teamA: teamLite(byId.get(f.teamA)), teamB: teamLite(byId.get(f.teamB)), scheduledAt: f.scheduledAt, played: !!f.matchId, open: !f.matchId && when != null && nowMs >= when, mine, score, winnerTeamId, drawn: !!f.matchId && f.winnerTeam == null,
+        roomCode: isOwner || mine ? f.roomCode : null };                       // the room code is only shown to the two teams and the owner
+    }).sort((x, y) => Rules.STAGES.indexOf(x.stage) - Rules.STAGES.indexOf(y.stage) || (x.scheduledAt ? +new Date(x.scheduledAt) : Infinity) - (y.scheduledAt ? +new Date(y.scheduledAt) : Infinity) || x.id - y.id);
+    const n = entered ? entered.length : 0, lf = fixtures.filter(f => f.stage === 'league');
+    return { league: { started: league.started, startedAt: league.startedAt, phase: league.phase, teamCount: n, champion: league.champion ? teamLite(byId.get(league.champion)) : null }, teams: shown.map(teamLite), standings, fixtures: fxView, serverNow: new Date(nowMs).toISOString(),
+      progress: { leagueTotal: n ? Rules.leagueMatchCount(n) : 0, leagueAnnounced: lf.length, leaguePlayed: lf.filter(f => f.matchId).length },
+      recent: recent.map(m => ({ id: m.id, teamA: m.teamAName, teamB: m.teamBName, teamAId: m.teamA, teamBId: m.teamB, playerA: m.playerAName, playerB: m.playerBName, goalsA: m.goalsA, goalsB: m.goalsB, result: m.result, reason: m.reason, league: !!m.league, stage: m.stage || (m.league ? 'league' : 'friendly'), varCount: m.varCount || 0, finishedAt: m.finishedAt })) };
   }
   // ---------- owner panel ----------
   async function mustTeam(id) { const t = await store.getTeamById(id); if (!t) throw err(404, 'TEAM_NOT_FOUND', 'Team not found.'); return t; }
@@ -281,14 +341,59 @@ function createCore({ store, env = process.env }) {
     },
     async startPenLeague(actor) {
       assertOwner(actor);
-      const r = await store.startPenLeague(actor.id);
+      const teams = (await store.listTeams({ status: 'active' })).sort((x, y) => x.id - y.id);
+      if (!Rules.LEAGUE_SIZES.includes(teams.length)) throw err(409, 'LEAGUE_TEAM_COUNT', `The league needs exactly 4, 6 or 8 ACTIVE teams (there are ${teams.length} now).`);
+      const r = await store.startPenLeague(actor.id, teams.map(t => t.id));
       if (r.kind === 'ALREADY') throw err(409, 'LEAGUE_ALREADY_STARTED', 'The league has already started.');
-      await audit(actor, 'pen.league.start', 'league', 1, { startedAt: r.startedAt });
-      return { ok: true, startedAt: r.startedAt };
+      await audit(actor, 'pen.league.start', 'league', 1, { startedAt: r.startedAt, teams: teams.map(t => t.id) });
+      return { ok: true, startedAt: r.startedAt, teams: teams.length };
+    },
+    // --- announcing the matches: the owner picks the pairing and the time, the GAME picks the room code
+    async addPenFixture(actor, b) {
+      assertOwner(actor);
+      const L = await store.getPenLeague(); if (L.phase !== 'league') throw err(409, 'NOT_LEAGUE_PHASE', 'League matches can only be announced while the round robin is running.');
+      const ta = +b.teamA, tb = +b.teamB;
+      if (!L.teams.includes(ta) || !L.teams.includes(tb)) throw err(400, 'BAD_TEAM', 'Pick two teams that are in the league.');
+      if (ta === tb) throw err(400, 'SAME_TEAM', 'A team cannot play itself.');
+      const when = parseWhen(b.scheduledAt), r = await addFixture('league', ta, tb, when);
+      if (r.kind === 'DUP_PAIR') throw err(409, 'PAIR_EXISTS', 'These two teams already have their match.');
+      await audit(actor, 'pen.fixture.add', 'fixture', r.fixture.id, { teamA: ta, teamB: tb, scheduledAt: when, roomCode: r.fixture.roomCode });
+      return { ok: true, fixture: r.fixture };
+    },
+    async generatePenFixtures(actor) {            // every missing pairing, time still to be announced
+      assertOwner(actor);
+      const L = await store.getPenLeague(); if (L.phase !== 'league') throw err(409, 'NOT_LEAGUE_PHASE', 'League matches can only be announced while the round robin is running.');
+      let created = 0; for (const [a, b] of Rules.roundRobinPairs(L.teams)) { const r = await addFixture('league', a, b, null); if (r.kind === 'OK') created++; }
+      await audit(actor, 'pen.fixture.generate', 'league', 1, { created }); return { ok: true, created };
+    },
+    async schedulePenFixture(actor, id, b) {
+      assertOwner(actor);
+      const f = await store.getPenFixture(id); if (!f) throw err(404, 'FIXTURE_NOT_FOUND', 'Match not found.');
+      if (f.matchId) throw err(409, 'ALREADY_PLAYED', 'This match has already been played.');
+      const when = parseWhen(b.scheduledAt); await store.updatePenFixture(id, { scheduledAt: when });
+      await audit(actor, 'pen.fixture.schedule', 'fixture', id, { scheduledAt: when }); return { ok: true, scheduledAt: when };
+    },
+    async deletePenFixture(actor, id) {
+      assertOwner(actor);
+      const f = await store.getPenFixture(id); if (!f) throw err(404, 'FIXTURE_NOT_FOUND', 'Match not found.');
+      if (f.stage !== 'league') throw err(409, 'PLAYOFF_FIXED', 'Play-off matches are created by the league and cannot be deleted.');
+      if (!(await store.deletePenFixture(id))) throw err(409, 'ALREADY_PLAYED', 'This match has already been played.');
+      await audit(actor, 'pen.fixture.delete', 'fixture', id, { teamA: f.teamA, teamB: f.teamB }); return { ok: true };
+    },
+    async penWalkover(actor, id, b) {             // a team did not show up: the owner awards 3-0 so the league can go on
+      assertOwner(actor);
+      const f = await store.getPenFixture(id); if (!f) throw err(404, 'FIXTURE_NOT_FOUND', 'Match not found.');
+      if (f.matchId) throw err(409, 'ALREADY_PLAYED', 'This match has already been played.');
+      const w = +b.winnerTeamId; if (w !== f.teamA && w !== f.teamB) throw err(400, 'BAD_TEAM', 'The winner must be one of the two teams of this match.');
+      const [ta, tb] = await Promise.all([store.getTeamById(f.teamA), store.getTeamById(f.teamB)]), aWins = w === f.teamA;
+      const rec = { id: 'wo-' + nodeCrypto.randomUUID(), teamA: f.teamA, teamB: f.teamB, playerA: ta ? ta.captainId : null, playerB: tb ? tb.captainId : null, goalsA: aWins ? 3 : 0, goalsB: aWins ? 0 : 3, kicksA: 0, kicksB: 0,
+        result: aWins ? 'A' : 'B', reason: 'walkover', league: f.stage === 'league', stage: f.stage, fixtureId: f.id, winnerTeam: w, varCount: 0, detail: { walkover: true, by: actor.id } };
+      const r = await store.recordPenMatch(rec); if (r.kind !== 'OK') throw err(409, 'ALREADY_PLAYED', 'This match has already been played.');
+      await audit(actor, 'pen.fixture.walkover', 'fixture', id, { winnerTeamId: w }); await penAdvance(); return { ok: true };
     },
     async listAudit(actor) { assertOwner(actor); return store.listAudit(150); },
   };
 
-  return { authenticate, register, login, logout, me, changePassword, recover, bootstrapOwner, registerTeam, publicTeams, teamLogo, setCaptainByTeam, footballClubs, selectFootballClub, myFootballClub, penCup, admin, limiter, purge: () => store.purgeExpiredSessions() };
+  return { authenticate, register, login, logout, me, changePassword, recover, bootstrapOwner, registerTeam, publicTeams, teamLogo, setCaptainByTeam, footballClubs, selectFootballClub, myFootballClub, penCup, penAdvance, admin, limiter, purge: () => store.purgeExpiredSessions() };
 }
 module.exports = { createCore, publicUser, teamView };

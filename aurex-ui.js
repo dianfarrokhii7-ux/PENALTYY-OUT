@@ -299,9 +299,19 @@ async function adminAudit(body) {
 }
 
 
-// ---------- penalty cup: table, results, play button (the match itself lives on /aurex-pen) ----------
+// ---------- penalty league: table, announced matches, play-offs (the match itself lives on /aurex-pen) ----------
 let cupTimer = null;
-const RES_LABEL = { normal: '', sudden_death: 'sudden death', cap_draw: 'draw after 10 kicks each', forfeit: 'forfeit' };
+const RES_LABEL = { normal: '', sudden_death: 'sudden death', cap_draw: 'draw after 10 kicks each', forfeit: 'forfeit', walkover: 'walkover' };
+const STAGE_NAME = { league: 'League', semi: 'Semi-final', final: 'Final', friendly: 'Friendly' };
+const fmtWhen = iso => (iso ? new Date(iso).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Time to be announced');
+const toLocalInput = iso => { if (!iso) return ''; const d = new Date(iso), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+const fromLocalInput = v => (v ? new Date(v).toISOString() : null);
+function formatNote(n) {
+  return n === 4 ? '4 teams: everybody plays everybody once. The team on top of the table is the champion.'
+    : n === 6 ? '6 teams: everybody plays everybody once. The top 3 go through: 2nd and 3rd play the semi-final, the winner meets the 1st-placed team in the final.'
+    : n === 8 ? '8 teams: everybody plays everybody once. The top 4 go through: 1st v 4th and 2nd v 3rd in the semi-finals, the winners meet in the final.'
+    : 'The league is played with 4, 6 or 8 teams: everybody plays everybody once, then the best teams go on to the play-offs.';
+}
 function cupTable(rows, started) {
   const cols = ['#', 'Team', 'P', 'W', 'D', 'L', 'GF', 'GA', 'GD', 'Pts', 'Form'];
   return h('div', { class: 'panel scroll' }, h('table', { class: 'tbl' },
@@ -320,36 +330,91 @@ function cupResults(list) {
       h('td', null, new Date(m.finishedAt).toLocaleString()),
       h('td', null, `${m.teamA} (${m.playerA}) vs ${m.teamB} (${m.playerB})`),
       h('td', null, h('b', null, `${m.goalsA} – ${m.goalsB}`)),
-      h('td', null, h('span', { class: 'chip ' + (m.league ? 'W' : 'D') }, m.league ? 'League' : 'Friendly')),
+      h('td', null, h('span', { class: 'chip ' + (m.stage === 'friendly' ? 'D' : 'W') }, STAGE_NAME[m.stage] || (m.league ? 'League' : 'Friendly'))),
       h('td', { class: 'muted' }, [RES_LABEL[m.reason] || '', m.varCount ? `VAR ×${m.varCount}` : ''].filter(Boolean).join(' · ') || '–'))))));
+}
+const fxTeam = (t, win) => h('span', { class: 'row' }, crest(t, true), win ? h('b', null, t.name) : t.name);
+function fxStatus(f) {
+  if (f.played) {
+    const sc = f.score ? `${f.score.a} – ${f.score.b}` : '', why = f.score && RES_LABEL[f.score.reason] ? ` (${RES_LABEL[f.score.reason]})` : '';
+    const adv = f.stage !== 'league' && f.winnerTeamId ? ` · ${(f.winnerTeamId === f.teamA.id ? f.teamA : f.teamB).name} through${f.drawn ? ' (higher seed)' : ''}` : '';
+    return h('span', null, h('b', null, sc), h('span', { class: 'muted small' }, why + adv));
+  }
+  return f.open ? h('span', { class: 'chip active' }, 'Open now') : f.scheduledAt ? h('span', { class: 'chip approved' }, 'Scheduled') : h('span', { class: 'chip pending' }, 'Time not announced');
+}
+/** One table for every announced match (league, semi-finals, final). admin = owner controls, otherwise the "Enter match" button for the player's own team. */
+function fixtureTable(list, admin, reload) {
+  if (!list.length) return h('p', { class: 'muted' }, admin ? 'No matches announced yet. Add them above.' : 'The owner has not announced any match yet.');
+  const heads = admin ? ['Stage', 'Match', 'When', 'Room code', 'Status', ''] : ['Stage', 'Match', 'When', 'Status', ''];
+  const rows = list.map(f => {
+    const win = id => f.played && f.winnerTeamId === id;
+    const stageCell = h('td', null, h('span', { class: 'chip ' + (f.stage === 'league' ? 'approved' : 'active') }, STAGE_NAME[f.stage]));
+    const matchCell = h('td', null, h('div', { class: 'row' }, fxTeam(f.teamA, win(f.teamA.id)), h('span', { class: 'muted' }, 'vs'), fxTeam(f.teamB, win(f.teamB.id))));
+    if (!admin) {
+      const act = f.mine && !f.played ? h('div', { class: 'row' }, f.roomCode ? h('span', { class: 'chip code' }, f.roomCode) : null,
+        h('a', { class: 'btn sm primary' + (f.open ? '' : ' disabled'), href: f.open ? '/aurex-pen?room=' + encodeURIComponent(f.roomCode) : null, 'aria-disabled': f.open ? null : 'true' }, f.open ? 'Enter match' : 'Opens at the announced time')) : null;
+      return h('tr', null, stageCell, matchCell, h('td', null, f.scheduledAt ? fmtWhen(f.scheduledAt) : h('span', { class: 'muted' }, 'To be announced')), h('td', null, fxStatus(f)), h('td', null, act));
+    }
+    const when = h('input', { type: 'datetime-local', value: toLocalInput(f.scheduledAt), 'aria-label': 'Match time', disabled: f.played });
+    const save = h('button', { class: 'btn sm', disabled: f.played, onclick: () => run(api('POST', `/admin/pen/fixtures/${f.id}/schedule`, { scheduledAt: fromLocalInput(when.value) }), 'Time saved', reload) }, 'Save');
+    const walk = t => h('button', { class: 'btn sm danger', onclick: async () => { const v = await ask({ title: `Award ${t.name} a 3–0 walkover`, text: 'Use this when the other team did not show up. It is recorded as the result of this match and cannot be undone.', confirm: 'Award walkover', danger: true }); if (v) run(api('POST', `/admin/pen/fixtures/${f.id}/walkover`, { winnerTeamId: t.id }), 'Walkover recorded', reload); } }, `${t.name} wins 3–0`);
+    const del = f.stage === 'league' ? h('button', { class: 'btn sm danger', onclick: async () => { const v = await ask({ title: 'Delete this match', text: `${f.teamA.name} v ${f.teamB.name} and its room code are removed. You can announce the pairing again.`, confirm: 'Delete', danger: true }); if (v) run(api('DELETE', `/admin/pen/fixtures/${f.id}`), 'Match deleted', reload); } }, 'Delete') : null;
+    return h('tr', null, stageCell, matchCell,
+      h('td', null, f.played ? fmtWhen(f.scheduledAt) : h('div', { class: 'row' }, when, save)),
+      h('td', null, h('span', { class: 'chip code' }, f.roomCode)), h('td', null, fxStatus(f)),
+      h('td', null, f.played ? null : h('div', { class: 'row' }, walk(f.teamA), walk(f.teamB), del)));
+  });
+  return h('div', { class: 'panel scroll' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, heads.map(x => h('th', null, x)))), h('tbody', null, rows)));
+}
+function leagueBanner(d) {
+  const L = d.league, p = d.progress;
+  if (L.phase === 'finished' && L.champion) return h('div', { class: 'banner good mb14' }, h('b', null, 'CHAMPION: ' + L.champion.name + '. '), 'The AUREX Penalty League is finished.');
+  if (L.phase === 'playoffs') return h('div', { class: 'banner good mb14' }, h('b', null, 'Play-offs. '), 'The round robin is over. Semi-finals and final are announced below. ', formatNote(L.teamCount));
+  if (L.phase === 'league') return h('div', { class: 'banner good mb14' }, h('b', null, `The league is LIVE — ${p.leaguePlayed} of ${p.leagueTotal} league matches played. `), 'Win 3 · draw 1 · loss 0. Only the matches the owner announces count; room matches stay friendlies. ', formatNote(L.teamCount));
+  return h('div', { class: 'banner warn mb14' }, 'The league has not started yet. Penalty duels from the lobby are friendlies and never count. ' + formatNote(0));
 }
 async function viewCup() {
   const body = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
   shell('cup', h('h2', null, 'AUREX Penalty Cup'), body);
   clearInterval(cupTimer);
   const load = async () => {
-    const d = await api('GET', '/pen/cup'), my = S.team && S.team.status === 'active';
+    const d = await api('GET', '/pen/cup'), my = S.team && S.team.status === 'active', mineNext = d.fixtures.filter(f => f.mine && !f.played);
     body.replaceChildren(
-      d.league.started
-        ? h('div', { class: 'banner good mb14' }, 'The league is LIVE. Every match started from now on counts in the table: win 3 · draw 1 · loss 0.')
-        : h('div', { class: 'banner warn mb14' }, 'The league has not started yet. Matches are friendlies and do not count in the table. The owner starts the league from the owner panel.'),
-      h('section', { class: 'panel mb14' }, h('h3', { class: 'mb6' }, 'Play a penalty duel'),
-        h('p', { class: 'muted mb14' }, 'Two players from two different teams. One shoots, one keeps goal, then you swap. Five kicks each, sudden death if level, a draw if it is still level after ten kicks each. An AI referee and VAR watch every kick.'),
-        h('div', { class: 'row' }, h('a', { class: 'btn primary' + (my ? '' : ' disabled'), href: my ? '/aurex-pen' : null, 'aria-disabled': my ? null : 'true' }, 'Play now'), my ? null : h('span', { class: 'muted' }, 'Your team must be active to play.'))),
+      leagueBanner(d),
+      mineNext.length ? h('section', { class: 'panel mb14' }, h('h3', { class: 'mb6' }, 'Your next league match'),
+        h('p', { class: 'muted mb14' }, 'The room opens at the announced time. Both teams enter with the room code (only your two teams can get in).'), fixtureTable(mineNext, false)) : null,
+      d.league.started ? [h('h3', { class: 'mt14 mb6' }, 'Matches'), fixtureTable(d.fixtures, false)] : null,
       h('h3', { class: 'mt14 mb6' }, 'Table'), cupTable(d.standings, d.league.started),
+      h('section', { class: 'panel mt14 mb14' }, h('h3', { class: 'mb6' }, 'Friendly duel'),
+        h('p', { class: 'muted mb14' }, 'Practise against another team in a private room or the quick queue. Friendlies never count. One shoots, one keeps goal, then you swap. Five kicks each, sudden death if level, a draw if it is still level after ten kicks each. An AI referee and VAR watch every kick.'),
+        h('div', { class: 'row' }, h('a', { class: 'btn' + (my ? '' : ' disabled'), href: my ? '/aurex-pen' : null, 'aria-disabled': my ? null : 'true' }, 'Play a friendly'), my ? null : h('span', { class: 'muted' }, 'Your team must be active to play.'))),
       h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent));
   };
   try { await load(); } catch (e) { body.replaceChildren(h('div', { class: 'banner bad' }, e.message)); return; }
   cupTimer = setInterval(() => { if (location.hash.replace(/^#\/?/, '').split('/')[0] !== 'cup') return clearInterval(cupTimer); load().catch(() => { }); }, 15000);
 }
 async function adminLeague(body) {
-  const d = await api('GET', '/pen/cup');
-  body.replaceChildren(h('section', { class: 'panel' }, h('h3', { class: 'mb6' }, 'Penalty league'),
-    d.league.started
-      ? [h('div', { class: 'banner good mb14' }, 'The league is running since ' + new Date(d.league.startedAt).toLocaleString() + '.'), h('p', { class: 'muted' }, 'Matches started after that moment count in the table. Earlier matches stay friendlies.')]
-      : [h('p', { class: 'muted mb14' }, 'Until you start the league every penalty match is a friendly and the table stays empty. After you press the button, every match that STARTS counts: win 3, draw 1, loss 0. This cannot be undone.'),
-        h('button', { class: 'btn primary', onclick: async () => { const v = await ask({ title: 'Start the penalty league', text: 'From now on every new penalty match counts in the table. Matches already played stay friendlies.', confirm: 'Start league' }); if (v) run(api('POST', '/admin/pen/league/start'), 'League started', () => adminLeague(body)); } }, 'Start league')]),
-    h('h3', { class: 'mt14 mb6' }, 'Table'), cupTable(d.standings, d.league.started), h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent));
+  const [d, { teams }] = await Promise.all([api('GET', '/pen/cup'), api('GET', '/admin/teams')]), reload = () => adminLeague(body), L = d.league;
+  const activeCount = teams.filter(t => t.status === 'active').length, okSize = [4, 6, 8].includes(activeCount);
+  if (!L.started) {
+    return body.replaceChildren(h('section', { class: 'panel' }, h('h3', { class: 'mb6' }, 'Penalty league'),
+      h('p', { class: 'muted mb14' }, 'The league is played with 4, 6 or 8 ACTIVE teams. When you press Start the teams are frozen. Then you announce every match (who plays whom and when); the game picks a room code for each and opens it at the announced time. Every team plays every other team once.'),
+      h('ul', { class: 'muted mb14' }, h('li', null, '4 teams: the table leader is the champion.'), h('li', null, '6 teams: top 3 go on. 2nd v 3rd in the semi-final, the winner plays the 1st in the final.'), h('li', null, '8 teams: top 4 go on. 1st v 4th and 2nd v 3rd, the winners play the final.')),
+      h('div', { class: 'banner ' + (okSize ? 'good' : 'warn') + ' mb14' }, `Active teams right now: ${activeCount}. ` + (okSize ? 'Ready to start.' : 'Activate or suspend teams until there are exactly 4, 6 or 8.')),
+      h('button', { class: 'btn primary', disabled: !okSize, onclick: async () => { const v = await ask({ title: 'Start the penalty league', text: `${activeCount} teams enter the league. The list is frozen from now on. This cannot be undone.`, confirm: 'Start league' }); if (v) run(api('POST', '/admin/pen/league/start'), 'League started', reload); } }, 'Start league'),
+      h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent)));
+  }
+  const selA = h('select', { 'aria-label': 'Team A' }, h('option', { value: '' }, 'Team A'), d.teams.map(t => h('option', { value: t.id }, t.name)));
+  const selB = h('select', { 'aria-label': 'Team B' }, h('option', { value: '' }, 'Team B'), d.teams.map(t => h('option', { value: t.id }, t.name)));
+  const when = h('input', { type: 'datetime-local', 'aria-label': 'Match time' });
+  const add = h('button', { class: 'btn primary', onclick: () => { if (!selA.value || !selB.value) return toast('Pick both teams', true); run(api('POST', '/admin/pen/fixtures', { teamA: +selA.value, teamB: +selB.value, scheduledAt: fromLocalInput(when.value) }), 'Match announced', reload); } }, 'Announce match');
+  const gen = h('button', { class: 'btn', onclick: () => run(api('POST', '/admin/pen/fixtures/generate'), 'Pairings created — now set the times', reload) }, 'Create all missing pairings');
+  body.replaceChildren(h('section', { class: 'panel' }, h('h3', { class: 'mb6' }, 'Penalty league'), leagueBanner(d),
+    L.phase === 'league' ? h('div', null, h('h3', { class: 'mb6' }, 'Announce a match'),
+      h('p', { class: 'muted mb14' }, `${d.progress.leagueAnnounced} of ${d.progress.leagueTotal} league matches announced. Pick the two teams and the time; the game chooses the room code, which opens at that time. Leave the time empty to set it later.`),
+      h('div', { class: 'row mb14' }, selA, selB, when, add), h('div', { class: 'mb14' }, gen)) : null,
+    h('h3', { class: 'mt14 mb6' }, 'Matches and room codes'), fixtureTable(d.fixtures, true, reload),
+    h('h3', { class: 'mt14 mb6' }, 'Table'), cupTable(d.standings, true), h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent)));
 }
 
 // ---------- router ----------

@@ -56,7 +56,7 @@ function createApi({ store, env = process.env }) {
   R('POST', '/select-club', { auth: true }, async c => ({ json: await core.selectFootballClub(c.user, c.body.footballClubId) }));
   R('GET', '/my-club', { auth: true }, async c => ({ json: { mine: await core.myFootballClub(c.user) } }));
   // --- penalty cup (public table; the owner starts the league)
-  R('GET', '/pen/cup', {}, async () => ({ json: await core.penCup() }));
+  R('GET', '/pen/cup', { auth: 'optional' }, async c => ({ json: await core.penCup(c.user) }));
   // --- owner panel (every route re-checks the OWNER role on the server)
   const A = { auth: true, owner: true };
   R('GET', '/admin/teams', A, async c => ({ json: { teams: await core.admin.listTeams(c.user, c.query.get('status')) } }));
@@ -75,6 +75,11 @@ function createApi({ store, env = process.env }) {
   R('POST', `/admin/teams/${ID}/football-club`, A, async c => ({ json: await core.admin.selectFootballClub(c.user, +c.params.id, c.body) }));
   R('DELETE', `/admin/teams/${ID}/football-club`, A, async c => ({ json: await core.admin.releaseFootballClub(c.user, +c.params.id) }));
   R('POST', '/admin/pen/league/start', A, async c => ({ json: await core.admin.startPenLeague(c.user) }));
+  R('POST', '/admin/pen/fixtures', A, async c => ({ status: 201, json: await core.admin.addPenFixture(c.user, c.body) }));
+  R('POST', '/admin/pen/fixtures/generate', A, async c => ({ json: await core.admin.generatePenFixtures(c.user) }));
+  R('POST', `/admin/pen/fixtures/${ID}/schedule`, A, async c => ({ json: await core.admin.schedulePenFixture(c.user, +c.params.id, c.body) }));
+  R('POST', `/admin/pen/fixtures/${ID}/walkover`, A, async c => ({ json: await core.admin.penWalkover(c.user, +c.params.id, c.body) }));
+  R('DELETE', `/admin/pen/fixtures/${ID}`, A, async c => ({ json: await core.admin.deletePenFixture(c.user, +c.params.id) }));
   R('GET', '/admin/audit', A, async c => ({ json: { entries: await core.admin.listAudit(c.user) } }));
 
   async function handler(req, res) {

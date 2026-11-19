@@ -83,4 +83,24 @@ function computeStandings(teams, matches) {
   return list;
 }
 
-module.exports = { REG_KICKS, CAP_KICKS, POINTS, newShootout, shooterOf, roundOf, decide, applyKick, outcomeOf, computeStandings };
+/* ---------------------------------------------------------------- league format (round robin + play-offs) */
+/*  4 teams: everybody plays everybody once, the table leader is the champion.
+ *  6 teams: top 3 go through. 2nd v 3rd play the semi-final, 1st waits in the final for the winner.
+ *  8 teams: top 4 go through. 1st v 4th and 2nd v 3rd play the semi-finals, the winners meet in the final. */
+const LEAGUE_SIZES = [4, 6, 8];
+const STAGES = ['league', 'semi', 'final'];
+const FIXTURE_CODE_FIRST = '23456789', CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const pairKey = (a, b) => (a < b ? a + '-' + b : b + '-' + a);
+/** Fixture room codes start with a DIGIT, friendly room codes always start with a letter: the two can never collide. */
+function makeFixtureCode(rng = Math.random) { let c = FIXTURE_CODE_FIRST[Math.floor(rng() * FIXTURE_CODE_FIRST.length)]; for (let i = 0; i < 4; i++) c += CODE_ALPHABET[Math.floor(rng() * CODE_ALPHABET.length)]; return c; }
+const isFixtureCode = c => /^[2-9][A-Z2-9]{4}$/.test(String(c || ''));
+function roundRobinPairs(ids) { const out = []; for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) out.push([ids[i], ids[j]]); return out; }
+const leagueMatchCount = n => n * (n - 1) / 2;
+/** Semi-final pairings from the final league ranking (team ids, best first). */
+function semiPairs(ranked) { const n = ranked.length; return n === 6 ? [[ranked[1], ranked[2]]] : n === 8 ? [[ranked[0], ranked[3]], [ranked[1], ranked[2]]] : []; }
+/** Final pairing: semiWinners in the order of semiPairs(). */
+function finalPair(ranked, semiWinners) { const n = ranked.length; return n === 6 ? [ranked[0], semiWinners[0]] : n === 8 ? [semiWinners[0], semiWinners[1]] : null; }
+/** Winner of a knock-out match. A penalty match that is still level after 10 kicks each (draw) is won by the team that finished higher in the league table. */
+function knockoutWinner(teamA, teamB, winnerTeam, rankOf) { if (winnerTeam != null) return winnerTeam; return (rankOf.get(teamA) || 99) <= (rankOf.get(teamB) || 99) ? teamA : teamB; }
+
+module.exports = { LEAGUE_SIZES, STAGES, pairKey, makeFixtureCode, isFixtureCode, roundRobinPairs, leagueMatchCount, semiPairs, finalPair, knockoutWinner, REG_KICKS, CAP_KICKS, POINTS, newShootout, shooterOf, roundOf, decide, applyKick, outcomeOf, computeStandings };

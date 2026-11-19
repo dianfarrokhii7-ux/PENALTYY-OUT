@@ -97,14 +97,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(120); ra.disconnect(); rb.disconnect();
   assert.strictEqual(nsp.rooms.get(created.code) && nsp.rooms.get(created.code).size || 0, 0);
 
-  // ---- the owner starts the league: only matches STARTED afterwards count
+  // ---- the league needs 4, 6 or 8 ACTIVE teams; room matches (quick / private code) are ALWAYS friendlies, only announced fixtures count
   const owner = await mk('owner_o', '10.0.0.8'); await store.updateUser(owner.id, { role: 'OWNER' });
   const o = await store.getUserById(owner.id);
   await assert.rejects(core.admin.startPenLeague({ ...a1, role: 'PLAYER', status: 'active' }), /Owner access/);
-  const st = await core.admin.startPenLeague(o); assert(st.ok);
-  await assert.rejects(core.admin.startPenLeague(o), /already started/);
-  assert.strictEqual((await core.penCup()).league.started, true);
-  assert((await core.admin.listAudit(o)).some(e => e.action === 'pen.league.start'));
+  await assert.rejects(core.admin.startPenLeague(o), /4, 6 or 8/); assert.strictEqual((await core.penCup()).league.started, false);
 
   // ---- quick match (queue) -> league match, with VAR forced by a goalkeeper creeping off his line
   const qa = (await conn(a2)).socket, qb = (await conn(b2)).socket;
@@ -112,7 +109,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const ja = qa.log.find(l => l[0] === 'joined')[1], jb2 = qb.log.find(l => l[0] === 'joined')[1]; assert.strictEqual(ja.code, jb2.code); assert.notStrictEqual(ja.you, jb2.you);
   const seats = { [ja.you]: qa, [jb2.you]: qb };
   qa.send('ready'); qb.send('ready');
-  const ms = await qa.wait('match:start'); assert.strictEqual(ms.league, true, 'matches that start after the owner pressed START LEAGUE count');
+  const ms = await qa.wait('match:start'); assert.strictEqual(ms.league, false); assert.strictEqual(ms.stage, 'friendly');
   // first kick: shooter aims dead centre & soft, keeper creeps forward to a grey-zone distance (0.25–0.55 m) and stays -> saved -> VAR -> retake
   const shooter = Rules.shooterOf({ first: ms.first, kicks: [0, 0] }), keeper = 1 - shooter, S = seats[shooter], K = seats[keeper];
   const t1 = await S.wait('turn', d => d.k === 1);
@@ -130,15 +127,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   qa.onc('turn', () => {}); // now let two bots play the rest of the match
   bot(qa, ja.you); bot(qb, jb2.you); keeperBot(qa, ja.you); keeperBot(qb, jb2.you);
   S.send('shoot', { ax: 0.5, ay: 0.4, pw: 0.5 });          // the retake itself (the bots only react to later turns)
-  const end2 = await qa.wait('end', null, 90000); assert.strictEqual(end2.league, true); assert.strictEqual(end2.saved, true);
-  { const lm = await store.allLeaguePenMatches(); assert.strictEqual(lm.length, 1);
-    const cup = await core.penCup(), rowA = cup.standings.find(r => r.teamId === tA.id), rowB = cup.standings.find(r => r.teamId === tB.id), rowC = cup.standings.find(r => r.teamId === tC.id);
-    assert.strictEqual(rowA.played, 1); assert.strictEqual(rowB.played, 1); assert.strictEqual(rowA.points + rowB.points, end2.result === 'DRAW' ? 2 : 3);
-    assert.strictEqual(rowA.gf, end2.table[0]); assert.strictEqual(rowB.ga, end2.table[0]); assert.strictEqual(rowC.played, 0);
-    assert.strictEqual(cup.recent[0].league, true); assert.strictEqual(cup.recent.length, 2); assert.strictEqual(cup.recent[1].league, false, 'the earlier friendly stays a friendly'); }
+  const end2 = await qa.wait('end', null, 90000); assert.strictEqual(end2.league, false); assert.strictEqual(end2.saved, true);
+  { assert.strictEqual((await store.allLeaguePenMatches()).length, 0, 'a quick match never counts in the table');
+    const cup = await core.penCup(); assert(cup.standings.every(r => r.played === 0 && r.points === 0));
+    assert.strictEqual(cup.recent[0].league, false); assert.strictEqual(cup.recent[0].stage, 'friendly'); assert.strictEqual(cup.recent.length, 2); }
   await sleep(120); qa.disconnect(); qb.disconnect();
 
-  // ---- disconnect: a short drop is forgiven, leaving for good forfeits (3-0 in the table, counted as a league match)
+  // ---- disconnect: a short drop is forgiven, leaving for good forfeits (3-0, stored as a friendly here)
   const fa = (await conn(a1)).socket, fb = (await conn(b1)).socket;
   fa.send('create'); const code = fa.log.find(l => l[0] === 'joined')[1].code; fb.send('join', { code }); fa.send('ready'); fb.send('ready');
   await fa.wait('match:start'); const you = { a: fa.log.find(l => l[0] === 'joined')[1].you, b: fb.log.find(l => l[0] === 'joined')[1].you };
@@ -149,7 +144,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   back.disconnect(); await sleep(T.reconnectMs + 150);
   const fend = await fa.wait('end'); assert.strictEqual(fend.reason, 'forfeit'); assert.strictEqual(fend.winner, you.a);
   assert.deepStrictEqual(fend.table, you.a === 0 ? [3, 0] : [0, 3]);
-  { const all = await store.listPenMatches({}); const f = all.find(m => m.reason === 'forfeit'); assert(f && f.league === true && f.goalsA + f.goalsB === 3); assert.strictEqual(all.length, 3); }
+  { const all = await store.listPenMatches({}); const f = all.find(m => m.reason === 'forfeit'); assert(f && f.league === false && f.goalsA + f.goalsB === 3); assert.strictEqual(all.length, 3); }
   fa.disconnect();
 
   // ---- both players vanish -> nothing is recorded
@@ -199,6 +194,47 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await sleep(T.whistleMs + 20); keeperSock.send('shoot', { ax: 0, ay: 0.3, pw: 0.5 }); await sleep(40); assert.strictEqual(sa.count('runup'), 0, 'the keeper cannot shoot');
     shooterSock.send('shoot', { ax: 0, ay: 0.3, pw: 0.5 }); await sa.wait('runup'); shooterSock.send('dive', { dir: 1, hi: false }); await sleep(30); assert.strictEqual(sa.count('dive'), 0, 'the shooter cannot dive');
     keeperSock.send('dive', { dir: 1, hi: false }); await sa.wait('dive'); sa.disconnect(); sb.disconnect(); await sleep(T.reconnectMs + 120);
+  }
+
+  // ---- announced league fixtures: room code opens at the announced time, only for the two teams, result lands in the table
+  {
+    const [d1, d2] = [await mk('dina_d1', '10.0.0.21'), await mk('dina_d2', '10.0.0.22')];
+    await store.updateTeam(tC.id, { status: 'active' }); const tD = await team('Delta FC', d1, d2, 'active');
+    assert((await core.admin.startPenLeague(o)).ok); await assert.rejects(core.admin.startPenLeague(o), /already started/);
+    assert((await core.admin.listAudit(o)).some(e => e.action === 'pen.league.start'));
+    const future = new Date(Date.now() + 3600e3).toISOString(), past = new Date(Date.now() - 1000).toISOString();
+    const fAB = (await core.admin.addPenFixture(o, { teamA: tA.id, teamB: tB.id, scheduledAt: future })).fixture, fCD = (await core.admin.addPenFixture(o, { teamA: tC.id, teamB: tD.id })).fixture;
+    assert(Rules.isFixtureCode(fAB.roomCode) && fAB.roomCode !== fCD.roomCode);
+    const err = (sock, code) => sock.log.filter(l => l[0] === 'err' && l[1].code === code).length;
+    const joinAndWait = async (sock, code, fixCode) => { sock.send('join', { code }); await sleep(30); return err(sock, fixCode); };
+    const xa = (await conn(a1)).socket, xb = (await conn(b1)).socket, xc = (await conn(c1)).socket;
+    assert.strictEqual(await joinAndWait(xa, fAB.roomCode, 'MATCH_NOT_OPEN'), 1, 'the room is closed before the announced time'); assert.strictEqual(xa.count('joined'), 0);
+    assert.strictEqual(await joinAndWait(xc, fAB.roomCode, 'NOT_YOUR_MATCH'), 1, 'a third team can never enter');
+    assert.strictEqual(await joinAndWait(xa, fCD.roomCode, 'NOT_YOUR_MATCH'), 1);
+    const xd = (await conn(d1)).socket; assert.strictEqual(await joinAndWait(xc, fCD.roomCode, 'MATCH_NOT_SCHEDULED'), 1, 'no time announced yet');
+    await core.admin.schedulePenFixture(o, fAB.id, { scheduledAt: past }); await core.admin.schedulePenFixture(o, fCD.id, { scheduledAt: past });
+    // a friendly "create" never produces a code that starts with a digit
+    for (let i = 0; i < 20; i++) { const t = (await conn(z)).socket; t.send('create'); t.disconnect(); }
+    // the two teams enter the announced room
+    xa.send('join', { code: fAB.roomCode.toLowerCase() }); await sleep(30); const jA = xa.log.find(l => l[0] === 'joined')[1]; assert.strictEqual(jA.code, fAB.roomCode); assert.strictEqual(jA.room.stage, 'league'); assert.strictEqual(jA.room.players[0].team.name, 'Alpha FC');
+    xb.send('join', { code: fAB.roomCode }); await sleep(30); assert.strictEqual(xb.count('joined'), 1);
+    xa.send('ready'); xb.send('ready');
+    const ms = await xa.wait('match:start'); assert.strictEqual(ms.league, true); assert.strictEqual(ms.stage, 'league');
+    const yA = xa.log.find(l => l[0] === 'joined')[1].you, yB = xb.log.find(l => l[0] === 'joined')[1].you;
+    bot(xa, yA); bot(xb, yB); keeperBot(xa, yA); keeperBot(xb, yB);
+    const endF = await xa.wait('end', null, 90000); assert.strictEqual(endF.saved, true); assert.strictEqual(endF.stage, 'league');
+    { const lm = await store.allLeaguePenMatches(); assert.strictEqual(lm.length, 1); const fx = await store.getPenFixture(fAB.id); assert.strictEqual(fx.matchId, lm[0].id, 'the fixture carries the result');
+      const cup = await core.penCup(), rowA = cup.standings.find(r => r.teamId === tA.id); assert.strictEqual(rowA.played, 1); assert.strictEqual(cup.fixtures.find(f => f.id === fAB.id).played, true); assert.strictEqual(cup.progress.leaguePlayed, 1); }
+    await sleep(80); xa.disconnect(); xb.disconnect();
+    const late = (await conn(a1)).socket; assert.strictEqual(await joinAndWait(late, fAB.roomCode, 'MATCH_PLAYED'), 1, 'a played match cannot be entered again'); late.disconnect();
+    // C v D: one team never leaves the lobby alone -> nothing recorded, the room can be re-opened; then D walks away mid-match -> forfeit counts as the league result
+    const yc = (await conn(c1)).socket; yc.send('join', { code: fCD.roomCode }); await sleep(30); assert.strictEqual(yc.count('joined'), 1); yc.send('leave'); await sleep(30);
+    assert.strictEqual((await store.getPenFixture(fCD.id)).matchId, null, 'leaving an empty lobby records nothing'); yc.disconnect(); xc.disconnect();
+    const yc2 = (await conn(c1)).socket, yd = (await conn(d1)).socket; yc2.send('join', { code: fCD.roomCode }); yd.send('join', { code: fCD.roomCode }); await sleep(30); yc2.send('ready'); yd.send('ready');
+    await yc2.wait('match:start'); await yc2.wait('turn'); const youC = yc2.log.find(l => l[0] === 'joined')[1].you;
+    yd.disconnect(); await sleep(T.reconnectMs + 150); const endCD = await yc2.wait('end'); assert.strictEqual(endCD.reason, 'forfeit'); assert.strictEqual(endCD.winner, youC); assert.strictEqual(endCD.stage, 'league');
+    { const fx = await store.getPenFixture(fCD.id); assert.strictEqual(fx.winnerTeam, tC.id); assert.strictEqual(fx.match.reason, 'forfeit'); const cup = await core.penCup(); assert.strictEqual(cup.progress.leaguePlayed, 2); }
+    yc2.disconnect(); xd.disconnect(); await sleep(60);
   }
   console.log('pen-room ok');
   process.exit(0);

@@ -8,7 +8,8 @@ if (!window.AurexPenPhysics || !window.PenGfx) { fatal('A game file failed to lo
 if (!window.io) { fatal('Could not reach the game server connection (socket.io). Reload the page.'); return; }
 const P = window.AurexPenPhysics, C = P.C, Gfx = window.PenGfx;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-let sock = null, off = 0, me = -1, uid = -1, actorList = [], room = null, players = [], league = false, phase = 'menu', turn = null, role = 'none', st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: 0 }, cards = [0, 0];
+let roomJoinTried = false;
+let sock = null, off = 0, me = -1, uid = -1, actorList = [], room = null, players = [], league = false, stage = 'friendly', phase = 'menu', turn = null, role = 'none', st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: 0 }, cards = [0, 0];
 let aim = { ax: 0, ay: 0.4, curve: 0 }, charging = false, chargeT0 = 0, power = 0, sent = false, ballAll = [], strikeAt = 0, shotClockTimer = null, timers = [], lastKin = '0,0', runInfo = null, started = false, sbReady = false, myTeam = null;
 const keys = new Set(), srv = () => Date.now() + off, later = (ms, fn) => { const t = setTimeout(fn, Math.max(0, ms)); timers.push(t); return t; };
 const clearLater = () => { timers.forEach(clearTimeout); timers = []; };
@@ -52,7 +53,7 @@ function dotsFor(side) {
 function renderBoard() {
   if (!players.length) return;
   players.forEach((p, i) => { text('tn' + i, p.team.name); text('pn' + i, p.members.map(m => m.username + (m.userId === uid ? ' (YOU)' : '')).join(' & ')); const im = $('cr' + i); if (im.getAttribute('src') !== crest(p.team)) im.src = crest(p.team); text('sc' + i, st.goals[i]); dotsFor(i); $('nm' + i).classList.toggle('act', !!turn && turn.shooter === i); });
-  const mt = $('modeTag'); mt.textContent = league ? 'LEAGUE MATCH' : 'FRIENDLY · NOT COUNTED IN THE TABLE'; mt.classList.toggle('league', league);
+  const mt = $('modeTag'); mt.textContent = stage === 'final' ? 'FINAL' : stage === 'semi' ? 'SEMI-FINAL' : league ? 'LEAGUE MATCH' : 'FRIENDLY · NOT COUNTED IN THE TABLE'; mt.classList.toggle('league', league);
   let label = 'PENALTIES';
   if (turn) { const k = st.kicks[turn.shooter] + 1; label = k > 5 ? `SUDDEN DEATH · ${k - 5}/5` : `KICK ${k} / 5`; if (turn.retake) label = 'RETAKE'; }
   text('label', label);
@@ -140,7 +141,9 @@ function connect() {
   sock.on('connect_error', e => { text('bootMsg', e && /AUTH/.test(e.message) ? 'Please sign in to AUREX first.' : 'Connection problem: ' + (e && e.message)); if (e && /AUTH/.test(e.message)) { $('bootLink').hidden = false; sock.close(); } });
   sock.on('connect', () => { text('conn', ''); syncClock(); });
   sock.on('disconnect', () => { if (phase !== 'end' && phase !== 'menu') text('conn', 'Connection lost — reconnecting… (you have 60 s)'); });
-  sock.on('hello', d => { myTeam = d.team; uid = d.user.id; setScreen('scrHome'); if (d.team) { text('myTeamName', d.team.name); text('myPlayer', d.user.username); $('myCrest').src = crest(d.team); } else { text('myTeamName', 'No active team'); text('myPlayer', d.user.username); } text('homeErr', d.error || ''); ['bQuick', 'bCreate', 'bJoin'].forEach(b => { $(b).disabled = !!d.error; }); });
+  sock.on('hello', d => { myTeam = d.team; uid = d.user.id; setScreen('scrHome'); if (d.team) { text('myTeamName', d.team.name); text('myPlayer', d.user.username); $('myCrest').src = crest(d.team); } else { text('myTeamName', 'No active team'); text('myPlayer', d.user.username); } text('homeErr', d.error || ''); ['bQuick', 'bCreate', 'bJoin'].forEach(b => { $(b).disabled = !!d.error; });
+    // coming from the cup page ("Enter match"): go straight into the announced room, once
+    const want = new URLSearchParams(location.search).get('room'); if (want && !d.error && !roomJoinTried) { roomJoinTried = true; $('codeIn').value = want.toUpperCase().slice(0, 5); try { history.replaceState(null, '', location.pathname); } catch (_) { } sock.emit('join', { code: want }); } });
   sock.on('err', d => { text('homeErr', d.message || d.code); if (d.code === 'OPENED_ELSEWHERE') { text('conn', d.message); } });
   sock.on('queue', () => setScreen('scrQueue'));
   sock.on('joined', d => { me = d.you; if (d.uid != null) uid = d.uid; setScreen('scrLobby'); lobbyUI(d.room); });
@@ -168,7 +171,7 @@ function syncClock() {
 function applyScore(d) { if (d.kicks) { st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first != null ? d.first : st.first }; } if (d.cards) cards = d.cards; renderBoard(); }
 
 function onMatchStart(d) {
-  started = true; league = d.league; players = d.players; phase = 'intro';
+  started = true; league = d.league; stage = d.stage || (d.league ? 'league' : 'friendly'); players = d.players; phase = 'intro';
   st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: d.first }; $('menu').classList.add('off'); show('hud', true); show('pad', false); Snd.unlock(); Snd.ambience();
   buildActors();
   try { initGfx(); Gfx.setActors(actorList); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('leave'); return; }
@@ -188,7 +191,7 @@ function safeLoop() { try { Gfx.render(); } catch (e) { if (!safeLoop.warned) { 
 function loop() { safeLoop(); tickClock(); inputFrame(); requestAnimationFrame(loop); }
 
 function onSync(d) {
-  started = true; me = d.you; if (d.uid != null) uid = d.uid; league = d.league; players = d.room.players.filter(Boolean); st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first }; cards = d.cards || [0, 0];
+  started = true; me = d.you; if (d.uid != null) uid = d.uid; league = d.league; stage = d.stage || (d.league ? 'league' : 'friendly'); players = d.room.players.filter(Boolean); st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first }; cards = d.cards || [0, 0];
   $('menu').classList.add('off'); show('hud', true); buildActors(); initGfx(); Gfx.setActors(actorList); Gfx.setClock(srv); renderBoard(); text('conn', '');
   if (d.turn && d.phase === 'aim') onTurn({ ...d.turn, ...d, k: d.turn.k }); else { phase = d.phase; Gfx.camera('result', true); text('hint', 'Reconnected — next kick coming up…'); }
 }
@@ -233,8 +236,8 @@ function onEnd(d) {
   phase = 'end'; clearLater(); hideCard(); show('var', false); show('callbox', false); show('pad', false); text('role', ''); text('hint', ''); text('conn', ''); applyScore(d); Gfx.setAim(0, 0, 0, false, 0); Gfx.camera('end');
   const win = d.winner === me, draw = d.winner == null; text('endTitle', draw ? 'DRAW' : win ? 'VICTORY' : 'DEFEAT'); text('endScore', `${d.table[0]} – ${d.table[1]}`);
   text('endTeams', `${players[0].team.name}  vs  ${players[1].team.name}`);
-  const mt = $('endMode'); mt.textContent = d.league ? 'LEAGUE MATCH — recorded in the AUREX table' : 'FRIENDLY — not counted in the table (the league has not started)'; mt.className = 'tagline' + (d.league ? ' league' : '');
-  const why = { normal: 'Won after the regular five kicks.', sudden_death: 'Won in sudden death.', cap_draw: 'Level after 10 kicks each — the match is a draw.', forfeit: d.winner === me ? 'Your opponent left the match — 3–0 awarded.' : 'You left the match — 3–0 awarded to your opponent.' }[d.reason] || '';
+  const mt = $('endMode'); mt.textContent = d.stage === 'final' ? 'FINAL — official result' : d.stage === 'semi' ? 'SEMI-FINAL — official result' : d.league ? 'LEAGUE MATCH — recorded in the AUREX table' : 'FRIENDLY — not counted in the table'; mt.className = 'tagline' + (d.league ? ' league' : '');
+  const why = { normal: 'Won after the regular five kicks.', sudden_death: 'Won in sudden death.', cap_draw: 'Level after 10 kicks each — the match is a draw.' + (d.stage === 'semi' || d.stage === 'final' ? ' The team that finished higher in the league table goes through.' : ''), forfeit: d.winner === me ? 'Your opponent left the match — 3–0 awarded.' : 'You left the match — 3–0 awarded to your opponent.' }[d.reason] || '';
   text('endWhy', why + (d.saved ? '' : '  (Warning: the result could not be saved — tell the owner.)'));
   if (!draw) { Gfx.react('goal', Math.max(0, actorList.findIndex(a => a.side === d.winner)), Math.max(0, actorList.findIndex(a => a.side !== d.winner))); Snd.roar(true); Gfx.crowdCheer(true); }
   later(2600, () => { setScreen('scrEnd'); });

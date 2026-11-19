@@ -4,10 +4,11 @@ const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 const dupErr = code => Object.assign(new Error(code), { code });
 
 function create() {
-  const S = { users: [], sessions: new Map(), teams: [], members: [], audit: [], owner: false, seq: 0, uid: 0, tid: 0, aid: 0, penLeague: { startedAt: null, startedBy: null }, penMatches: [] };
+  const S = { users: [], sessions: new Map(), teams: [], members: [], audit: [], owner: false, seq: 0, uid: 0, tid: 0, aid: 0, penLeague: { startedAt: null, startedBy: null, phase: 'idle', teams: null, champion: null }, penMatches: [], penFixtures: [], fid: 0 };
   const userOut = u => (u ? { id: u.id, username: u.username, role: u.role, status: u.status, createdAt: u.createdAt, passHash: u.passHash, recoveryHash: u.recoveryHash } : null);
   const memberRows = tid => S.members.filter(m => m.teamId === tid).sort((a, b) => a.slot - b.slot)
     .map(m => ({ userId: m.userId, username: S.users.find(u => u.id === m.userId).username, slot: m.slot }));
+  const fxOut = f => { if (!f) return null; const m = f.matchId ? S.penMatches.find(x => x.id === f.matchId) : null; return { ...clone(f), match: m ? { id: m.id, teamA: m.teamA, teamB: m.teamB, goalsA: m.goalsA, goalsB: m.goalsB, result: m.result, reason: m.reason } : null }; };
   const teamOut = t => (t ? {
     id: t.id, name: t.name, teamCode: t.teamCode, status: t.status, captainId: t.captainId, createdBy: t.createdBy,
     rejectReason: t.rejectReason, suspendReason: t.suspendReason, decidedBy: t.decidedBy, decidedAt: t.decidedAt,
@@ -82,21 +83,39 @@ function create() {
     async nextTeamNumber() { return ++S.seq; },
     async getLogo(teamId) { const t = S.teams.find(x => x.id === teamId); return t && t.logo ? { mime: t.logo.mime, data: Buffer.from(t.logo.data) } : null; },
     // ---- AUREX penalty cup
-    async getPenLeague() { return { started: !!S.penLeague.startedAt, startedAt: S.penLeague.startedAt, startedBy: S.penLeague.startedBy }; },
-    async startPenLeague(userId) {
-      if (S.penLeague.startedAt) return { kind: 'ALREADY', startedAt: S.penLeague.startedAt };
-      S.penLeague = { startedAt: new Date().toISOString(), startedBy: userId }; return { kind: 'OK', startedAt: S.penLeague.startedAt };
+    async getPenLeague() { const L = S.penLeague; return { started: !!L.startedAt, startedAt: L.startedAt, startedBy: L.startedBy, phase: L.phase || 'idle', teams: L.teams ? L.teams.slice() : null, champion: L.champion || null }; },
+    async startPenLeague(userId, teamIds) {
+      if (S.penLeague.startedAt && S.penLeague.phase !== 'idle') return { kind: 'ALREADY', startedAt: S.penLeague.startedAt };
+      S.penLeague = { startedAt: new Date().toISOString(), startedBy: userId, phase: 'league', teams: (teamIds || []).slice(), champion: null }; return { kind: 'OK', startedAt: S.penLeague.startedAt };
     },
+    async setPenLeaguePhase(phase, champion) { S.penLeague.phase = phase; if (champion !== undefined) S.penLeague.champion = champion; },
+    // fixtures: scheduled matches with a room code that opens at the announced time
+    async createPenFixture({ stage, teamA, teamB, scheduledAt, roomCode }) {
+      const key = [Math.min(teamA, teamB), Math.max(teamA, teamB)].join('-');
+      if (S.penFixtures.some(f => f.stage === stage && [Math.min(f.teamA, f.teamB), Math.max(f.teamA, f.teamB)].join('-') === key)) return { kind: 'DUP_PAIR' };
+      if (S.penFixtures.some(f => f.roomCode === roomCode)) return { kind: 'DUP_CODE' };
+      const f = { id: ++S.fid, stage, teamA, teamB, scheduledAt: scheduledAt || null, roomCode, matchId: null, winnerTeam: null, createdAt: new Date().toISOString() };
+      S.penFixtures.push(f); return { kind: 'OK', fixture: clone(f) };
+    },
+    async getPenFixture(id) { return fxOut(S.penFixtures.find(f => f.id === id)); },
+    async getPenFixtureByCode(code) { return fxOut(S.penFixtures.find(f => f.roomCode === code)); },
+    async listPenFixtures() { return S.penFixtures.slice().sort((a, b) => a.id - b.id).map(f => fxOut(f)); },
+    async updatePenFixture(id, patch) { const f = S.penFixtures.find(x => x.id === id); if (!f) return null; if (patch.scheduledAt !== undefined) f.scheduledAt = patch.scheduledAt; return fxOut(f); },
+    async deletePenFixture(id) { const i = S.penFixtures.findIndex(f => f.id === id); if (i < 0 || S.penFixtures[i].matchId) return false; S.penFixtures.splice(i, 1); return true; },
     async recordPenMatch(m) {
       if (S.penMatches.some(x => x.id === m.id)) return { kind: 'DUP' };
-      S.penMatches.push({ ...clone(m), finishedAt: m.finishedAt || new Date().toISOString() }); return { kind: 'OK' };
+      let f = null;
+      if (m.fixtureId != null) { f = S.penFixtures.find(x => x.id === m.fixtureId); if (!f) return { kind: 'NO_FIXTURE' }; if (f.matchId) return { kind: 'DUP' }; }
+      S.penMatches.push({ ...clone(m), stage: m.stage || 'friendly', fixtureId: m.fixtureId == null ? null : m.fixtureId, finishedAt: m.finishedAt || new Date().toISOString() });
+      if (f) { f.matchId = m.id; f.winnerTeam = m.winnerTeam == null ? null : m.winnerTeam; }
+      return { kind: 'OK' };
     },
     async listPenMatches({ leagueOnly = false, limit = 50 } = {}) {
       const nm = id => { const t = S.teams.find(x => x.id === id); return t ? t.name : '?'; }, un = id => { const u = S.users.find(x => x.id === id); return u ? u.username : '?'; };
       return S.penMatches.filter(m => !leagueOnly || m.league).slice().sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)) || String(b.id).localeCompare(String(a.id))).slice(0, limit)
         .map(m => ({ ...clone(m), teamAName: nm(m.teamA), teamBName: nm(m.teamB), playerAName: un(m.playerA), playerBName: un(m.playerB) }));
     },
-    async allLeaguePenMatches() { return S.penMatches.filter(m => m.league).map(clone); },
+    async allLeaguePenMatches() { return S.penMatches.filter(m => m.league && m.fixtureId != null).map(clone); },
     // audit
     async addAudit({ actorId, action, targetType, targetId, detail }) {
       S.audit.push({ id: ++S.aid, actorId, action, targetType: targetType || null, targetId: targetId == null ? null : String(targetId), detail: clone(detail) || null, createdAt: new Date().toISOString() });

@@ -10,6 +10,10 @@ function create(url, env = process.env) {
   pool.on('error', e => console.error('[aurex] pg pool error:', e.message));
   const q = (text, params) => pool.query(text, params);
   const iso = d => (d instanceof Date ? d.toISOString() : d);
+  const FX_SQL = `SELECT f.*, m.team_a AS m_team_a, m.team_b AS m_team_b, m.goals_a AS m_goals_a, m.goals_b AS m_goals_b, m.result AS m_result, m.reason AS m_reason
+    FROM aurex_pen_fixtures f LEFT JOIN aurex_pen_matches m ON m.id = f.match_id`;
+  const fxOut = r => (r ? { id: r.id, stage: r.stage, teamA: r.team_a, teamB: r.team_b, scheduledAt: r.scheduled_at ? iso(r.scheduled_at) : null, roomCode: r.room_code, matchId: r.match_id || null, winnerTeam: r.winner_team || null, createdAt: iso(r.created_at),
+    match: r.match_id ? { id: r.match_id, teamA: r.m_team_a, teamB: r.m_team_b, goalsA: r.m_goals_a, goalsB: r.m_goals_b, result: r.m_result, reason: r.m_reason } : null } : null);
   const dup = code => Object.assign(new Error(code), { code });
 
   const userOut = r => (r ? { id: r.id, username: r.username, role: r.role, status: r.status, createdAt: iso(r.created_at), passHash: r.pass_hash, recoveryHash: r.recovery_hash } : null);
@@ -179,27 +183,61 @@ function create(url, env = process.env) {
       return r.rows[0] ? { mime: r.rows[0].logo_mime, data: r.rows[0].logo_data } : null;
     },
     // ---- AUREX penalty cup
-    async getPenLeague() { const r = (await q('SELECT started_at, started_by FROM aurex_pen_league WHERE id = 1')).rows[0]; return { started: !!(r && r.started_at), startedAt: r ? iso(r.started_at) : null, startedBy: r ? r.started_by : null }; },
-    async startPenLeague(userId) {
-      const r = await q('UPDATE aurex_pen_league SET started_at = now(), started_by = $1 WHERE id = 1 AND started_at IS NULL RETURNING started_at', [userId]);
+    async getPenLeague() {
+      const r = (await q('SELECT started_at, started_by, phase, teams, champion_team FROM aurex_pen_league WHERE id = 1')).rows[0] || {};
+      return { started: !!r.started_at && !!r.phase && r.phase !== 'idle', startedAt: r.started_at ? iso(r.started_at) : null, startedBy: r.started_by || null, phase: r.phase || 'idle', teams: r.teams || null, champion: r.champion_team || null };
+    },
+    async startPenLeague(userId, teamIds) {
+      // allowed only while the phase is still idle (a league started under the old rules has no phase and is restarted cleanly: old matches have no fixture, so they never count)
+      const r = await q("UPDATE aurex_pen_league SET started_at = now(), started_by = $1, phase = 'league', teams = $2, champion_team = NULL WHERE id = 1 AND (phase IS NULL OR phase = 'idle') RETURNING started_at", [userId, JSON.stringify(teamIds || [])]);
       if (r.rowCount) return { kind: 'OK', startedAt: iso(r.rows[0].started_at) };
       return { kind: 'ALREADY', startedAt: iso((await q('SELECT started_at FROM aurex_pen_league WHERE id = 1')).rows[0].started_at) };
     },
+    async setPenLeaguePhase(phase, champion) {
+      if (champion === undefined) await q('UPDATE aurex_pen_league SET phase = $1 WHERE id = 1', [phase]);
+      else await q('UPDATE aurex_pen_league SET phase = $1, champion_team = $2 WHERE id = 1', [phase, champion]);
+    },
+    // fixtures: scheduled matches with a room code that opens at the announced time
+    async createPenFixture({ stage, teamA, teamB, scheduledAt, roomCode }) {
+      try {
+        const r = await q('INSERT INTO aurex_pen_fixtures(stage, team_a, team_b, scheduled_at, room_code) VALUES ($1,$2,$3,$4,$5) RETURNING *', [stage, teamA, teamB, scheduledAt || null, roomCode]);
+        return { kind: 'OK', fixture: fxOut(r.rows[0]) };
+      } catch (e) {
+        if (e.code === '23505') return { kind: /room_code/.test(String(e.constraint || e.detail || e.message)) ? 'DUP_CODE' : 'DUP_PAIR' };
+        throw e;
+      }
+    },
+    async getPenFixture(id) { return fxOut((await q(FX_SQL + ' WHERE f.id = $1', [id])).rows[0]); },
+    async getPenFixtureByCode(code) { return fxOut((await q(FX_SQL + ' WHERE f.room_code = $1', [code])).rows[0]); },
+    async listPenFixtures() { return (await q(FX_SQL + ' ORDER BY f.id')).rows.map(fxOut); },
+    async updatePenFixture(id, patch) { if (patch.scheduledAt !== undefined) await q('UPDATE aurex_pen_fixtures SET scheduled_at = $2 WHERE id = $1', [id, patch.scheduledAt]); return this.getPenFixture(id); },
+    async deletePenFixture(id) { return (await q('DELETE FROM aurex_pen_fixtures WHERE id = $1 AND match_id IS NULL', [id])).rowCount > 0; },
     async recordPenMatch(m) {
-      const r = await q(`INSERT INTO aurex_pen_matches(id, team_a, team_b, player_a, player_b, goals_a, goals_b, kicks_a, kicks_b, result, reason, league, var_count, detail)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (id) DO NOTHING`,
-        [m.id, m.teamA, m.teamB, m.playerA || null, m.playerB || null, m.goalsA, m.goalsB, m.kicksA || 0, m.kicksB || 0, m.result, m.reason, !!m.league, m.varCount || 0, m.detail ? JSON.stringify(m.detail) : null]);
-      return { kind: r.rowCount ? 'OK' : 'DUP' };
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        if (m.fixtureId != null) {
+          const f = await c.query('SELECT id, match_id FROM aurex_pen_fixtures WHERE id = $1 FOR UPDATE', [m.fixtureId]);
+          if (!f.rowCount) { await c.query('ROLLBACK'); return { kind: 'NO_FIXTURE' }; }
+          if (f.rows[0].match_id) { await c.query('ROLLBACK'); return { kind: 'DUP' }; }     // a fixture can only ever carry ONE result
+        }
+        const r = await c.query(`INSERT INTO aurex_pen_matches(id, team_a, team_b, player_a, player_b, goals_a, goals_b, kicks_a, kicks_b, result, reason, league, var_count, detail, stage, fixture_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (id) DO NOTHING`,
+          [m.id, m.teamA, m.teamB, m.playerA || null, m.playerB || null, m.goalsA, m.goalsB, m.kicksA || 0, m.kicksB || 0, m.result, m.reason, !!m.league, m.varCount || 0, m.detail ? JSON.stringify(m.detail) : null, m.stage || 'friendly', m.fixtureId == null ? null : m.fixtureId]);
+        if (!r.rowCount) { await c.query('ROLLBACK'); return { kind: 'DUP' }; }
+        if (m.fixtureId != null) await c.query('UPDATE aurex_pen_fixtures SET match_id = $2, winner_team = $3 WHERE id = $1', [m.fixtureId, m.id, m.winnerTeam == null ? null : m.winnerTeam]);
+        await c.query('COMMIT'); return { kind: 'OK' };
+      } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
     },
     async listPenMatches({ leagueOnly = false, limit = 50 } = {}) {
       const r = await q(`SELECT m.*, ta.name AS ta_name, tb.name AS tb_name, ua.username AS ua_name, ub.username AS ub_name FROM aurex_pen_matches m
         JOIN teams ta ON ta.id = m.team_a JOIN teams tb ON tb.id = m.team_b LEFT JOIN users ua ON ua.id = m.player_a LEFT JOIN users ub ON ub.id = m.player_b
-        WHERE ($1::boolean = FALSE OR m.league) ORDER BY m.finished_at DESC, m.id DESC LIMIT $2`, [!!leagueOnly, limit]);
+        WHERE ($1::boolean = FALSE OR (m.league AND m.fixture_id IS NOT NULL)) ORDER BY m.finished_at DESC, m.id DESC LIMIT $2`, [!!leagueOnly, limit]);
       return r.rows.map(x => ({ id: x.id, teamA: x.team_a, teamB: x.team_b, playerA: x.player_a, playerB: x.player_b, goalsA: x.goals_a, goalsB: x.goals_b, kicksA: x.kicks_a, kicksB: x.kicks_b,
-        result: x.result, reason: x.reason, league: x.league, varCount: x.var_count, finishedAt: iso(x.finished_at), teamAName: x.ta_name, teamBName: x.tb_name, playerAName: x.ua_name || '?', playerBName: x.ub_name || '?' }));
+        result: x.result, reason: x.reason, league: x.league, stage: x.stage, fixtureId: x.fixture_id, varCount: x.var_count, finishedAt: iso(x.finished_at), teamAName: x.ta_name, teamBName: x.tb_name, playerAName: x.ua_name || '?', playerBName: x.ub_name || '?' }));
     },
     async allLeaguePenMatches() {
-      const r = await q('SELECT id, team_a, team_b, goals_a, goals_b, result, finished_at FROM aurex_pen_matches WHERE league ORDER BY finished_at, id');
+      const r = await q('SELECT id, team_a, team_b, goals_a, goals_b, result, finished_at FROM aurex_pen_matches WHERE league AND fixture_id IS NOT NULL ORDER BY finished_at, id');
       return r.rows.map(x => ({ id: x.id, teamA: x.team_a, teamB: x.team_b, goalsA: x.goals_a, goalsB: x.goals_b, result: x.result, finishedAt: iso(x.finished_at) }));
     },
     // audit

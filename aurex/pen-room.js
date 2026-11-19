@@ -30,7 +30,8 @@ function attach(io, { store, api }, opts = {}) {
   let queue = [];                     // [{ userId, at }]
 
   /* ---------------------------------------------------------------- helpers */
-  const newCode = () => { let c; do { c = Array.from({ length: 5 }, () => CODE_CHARS[Math.floor(rng() * CODE_CHARS.length)]).join(''); } while (rooms.has(c)); return c; };
+  const LETTERS = CODE_CHARS.replace(/[2-9]/g, '');
+  const newCode = () => { let c; do { c = LETTERS[Math.floor(rng() * LETTERS.length)] + Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(rng() * CODE_CHARS.length)]).join(''); } while (rooms.has(c)); return c; };
   const emit = (r, ev, data) => nsp.to(r.code).emit(ev, { ...data, ts: now() });
   // a "side" is one TEAM in the duel: 1 or 2 registered members of that team (solo play is allowed)
 const memberView = m => ({ userId: m.userId, username: m.username, on: m.on, ready: m.ready });
@@ -38,7 +39,7 @@ const pub = s => s ? { team: s.team, members: s.members.map(memberView), on: s.m
 const MAX_MEMBERS = 2;
   const clearTimers = r => { for (const k of Object.keys(r.t)) { clearTimeout(r.t[k]); clearInterval(r.t[k]); } r.t = {}; };
   const scoreView = r => r.sh ? { kicks: [...r.sh.kicks], goals: [...r.sh.goals], log: r.sh.log.map(l => l.map(e => ({ ...e }))), first: r.sh.first } : null;
-  const roomView = r => ({ code: r.code, phase: r.phase, league: r.league, players: r.players.map(pub), ...(r.sh ? scoreView(r) : {}) });
+  const roomView = r => ({ code: r.code, phase: r.phase, league: r.stage !== 'friendly', stage: r.stage, players: r.players.map(pub), ...(r.sh ? scoreView(r) : {}) });
 
   async function playerInfo(user) {
     const team = await store.getActiveTeamForUser(user.id);
@@ -62,8 +63,9 @@ const MAX_MEMBERS = 2;
   });
 
   /* ---------------------------------------------------------------- rooms */
-  function makeRoom() {
-    const r = { code: newCode(), id: crypto.randomUUID(), phase: 'lobby', players: [null, null], league: false, sh: null, t: {}, turn: null, waiting: false, saved: false, varCount: 0, vars: [], createdAt: now(), ended: false };
+  /** A friendly room (random code that starts with a LETTER) or the room of an announced league fixture (its own code, starts with a digit). */
+  function makeRoom(fixture) {
+    const r = { code: fixture ? fixture.roomCode : newCode(), id: crypto.randomUUID(), phase: 'lobby', players: [null, null], league: false, stage: fixture ? fixture.stage : 'friendly', fixture: fixture || null, sh: null, t: {}, turn: null, waiting: false, saved: false, varCount: 0, vars: [], createdAt: now(), ended: false };
     rooms.set(r.code, r); return r;
   }
   /** Seats a user on the side of HIS team (a second registered member joins his teammate's side) or on a free side. Returns the side index or -1. */
@@ -107,11 +109,14 @@ const MAX_MEMBERS = 2;
   async function startMatch(r) {
     if (r.phase !== 'lobby' || !r.players[0] || !r.players[1]) return;
     r.phase = 'starting';
-    let league = false; try { league = (await store.getPenLeague()).started; } catch (_) { /* a failed read counts as friendly: never a wrong table entry */ }
+    if (r.fixture) {                                             // an announced league match: only while its fixture is still unplayed
+      let f = null; try { f = await store.getPenFixture(r.fixture.id); } catch (_) { f = null; }
+      if (!f || f.matchId) { r.phase = 'lobby'; r.players.forEach(sd => { if (sd) sd.members.forEach(m => { m.ready = false; }); }); emit(r, 'err', { code: 'MATCH_PLAYED', message: 'This league match has already been decided.' }); lobbyUpdate(r); return; }
+    }
     if (r.phase !== 'starting') return;
-    r.league = !!league;                                         // decided ONCE, when the match starts
+    r.league = r.stage === 'league';                             // only the round robin counts in the table; friendlies never do
     const first = rng() < 0.5 ? 0 : 1; r.sh = Rules.newShootout(first); r.phase = 'intro'; r.k = 0;
-    emit(r, 'match:start', { matchId: r.id, league: r.league, first, players: r.players.map(pub), introMs: T.introMs, room: roomView(r) });
+    emit(r, 'match:start', { matchId: r.id, league: r.stage !== 'friendly', stage: r.stage, first, players: r.players.map(pub), introMs: T.introMs, room: roomView(r) });
     r.t.intro = setTimeout(() => nextKick(r), T.introMs);
   }
 
@@ -253,12 +258,13 @@ const MAX_MEMBERS = 2;
     const table = forfeit ? (winner === 0 ? [3, 0] : [0, 3]) : [a[0], a[1]];
     const result = Rules.outcomeOf(winner);
     const rec = { id: r.id, teamA: r.players[0].team.id, teamB: r.players[1].team.id, playerA: r.players[0].members[0].userId, playerB: r.players[1].members[0].userId, goalsA: table[0], goalsB: table[1],
-      kicksA: r.sh ? r.sh.kicks[0] : 0, kicksB: r.sh ? r.sh.kicks[1] : 0, result, reason: forfeit ? 'forfeit' : reason, league: r.league, varCount: r.varCount,
+      kicksA: r.sh ? r.sh.kicks[0] : 0, kicksB: r.sh ? r.sh.kicks[1] : 0, result, reason: forfeit ? 'forfeit' : reason, league: r.league, stage: r.stage, fixtureId: r.fixture ? r.fixture.id : null, winnerTeam: winner == null ? null : r.players[winner].team.id, varCount: r.varCount,
       detail: { members: r.players.map(sd => sd.members.map(m => m.username)), first: r.sh && r.sh.first, log: r.sh && r.sh.log, cards: r.players.map(p => p.yellow), vars: r.vars, actual: a } };
     let saved = false;
-    for (let attempt = 0; attempt < 3 && !saved; attempt++) { try { await store.recordPenMatch(rec); saved = true; } catch (e) { console.error('[aurex-pen] could not store result:', e.message); await new Promise(res => setTimeout(res, 400)); } }
+    for (let attempt = 0; attempt < 3 && !saved; attempt++) { try { saved = (await store.recordPenMatch(rec)).kind === 'OK'; if (!saved) break; } catch (e) { console.error('[aurex-pen] could not store result:', e.message); await new Promise(res => setTimeout(res, 400)); } }
     r.saved = saved;
-    emit(r, 'end', { matchId: r.id, winner, result, reason: rec.reason, league: r.league, table, actual: a, saved, ...(r.sh ? scoreView(r) : {}), players: r.players.map(pub), varCount: r.varCount, cards: r.players.map(p => p.yellow) });
+    emit(r, 'end', { matchId: r.id, winner, result, reason: rec.reason, league: r.stage !== 'friendly', stage: r.stage, table, actual: a, saved, ...(r.sh ? scoreView(r) : {}), players: r.players.map(pub), varCount: r.varCount, cards: r.players.map(p => p.yellow) });
+    if (saved && r.fixture) { try { await core.penAdvance(); } catch (e) { console.error('[aurex-pen] league advance failed:', e.message); } }   // round robin done -> play-offs / final / champion
     for (const sd of r.players) if (sd) for (const m of sd.members) if (userRoom.get(m.userId) === r) userRoom.delete(m.userId);
     r.t.cleanup = setTimeout(() => destroy(r), T.cleanupMs);
   }
@@ -287,7 +293,7 @@ const MAX_MEMBERS = 2;
       socket.emit('joined', { you: i, uid: u.id, code: r0.code, room: roomView(r0), ts: now(), resumed: true });
       if (r0.sh && r0.phase !== 'lobby') {
         const t = r0.turn;
-        socket.emit('sync', { you: i, uid: u.id, room: roomView(r0), phase: r0.phase, matchId: r0.id, league: r0.league, ...(r0.sh ? scoreView(r0) : {}), cards: r0.players.map(q => q.yellow),
+        socket.emit('sync', { you: i, uid: u.id, room: roomView(r0), phase: r0.phase, matchId: r0.id, league: r0.stage !== 'friendly', stage: r0.stage, ...(r0.sh ? scoreView(r0) : {}), cards: r0.players.map(q => q.yellow),
           turn: t ? { k: t.k, shooter: t.side, keeper: t.keeper, shooterUser: t.shooterUser, keeperUser: t.keeperUser, retake: t.retakes, whistleAt: t.whistleAt, deadline: t.deadline, strikeAt: t.strikeAt, runAt: t.runAt, keeperPos: r0.players[t.keeper].kp, dive: t.dive, feint: t.feint } : null, ts: now() });
       }
       emit(r0, 'room', { room: roomView(r0) });
@@ -300,9 +306,28 @@ const MAX_MEMBERS = 2;
       if (room() || !checkEligible(socket)) return;
       const r = makeRoom(); const i = seat(r, socket); socket.emit('joined', { you: i, uid: u.id, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
     }));
+    /** Room of an announced league match: only the two teams, only from the announced time, only until the match has a result. */
+    async function joinFixture(code) {
+      const fail = (c, message, extra) => socket.emit('err', { code: c, message, ...(extra || {}) });
+      let f = null; try { f = await store.getPenFixtureByCode(code); } catch (_) { f = null; }
+      if (!f) return fail('ROOM_NOT_FOUND', 'Room not found or already started.');
+      if (f.matchId) return fail('MATCH_PLAYED', 'This league match has already been played.');
+      const team = socket.data.team; if (!team || (team.id !== f.teamA && team.id !== f.teamB)) return fail('NOT_YOUR_MATCH', 'This room belongs to a league match of two other teams.');
+      if (!f.scheduledAt) return fail('MATCH_NOT_SCHEDULED', 'The owner has not announced the time of this match yet.');
+      const opensAt = +new Date(f.scheduledAt); if (now() < opensAt) return fail('MATCH_NOT_OPEN', 'This room opens on ' + new Date(opensAt).toUTCString().replace(' GMT', ' UTC') + '.', { opensAt: f.scheduledAt });
+      if (room()) return;                                                  // joined somewhere else while we were checking
+      let r = rooms.get(code);
+      if (r && r.phase !== 'lobby') return fail('ROOM_FULL', 'This match has already started.');
+      if (!r) r = makeRoom(f);
+      const i = seat(r, socket); if (i < 0) { if (!r.players[0] && !r.players[1]) destroy(r); return fail('ROOM_FULL', 'This room is full (or your team already has 2 players in it).'); }
+      r.players.forEach(sd => { if (sd) sd.members.forEach(m => { m.ready = false; }); });
+      socket.emit('joined', { you: i, uid: u.id, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
+    }
     socket.on('join', wrap(d => {
       if (room() || !checkEligible(socket)) return;
-      const code = String(d && d.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5), r = rooms.get(code);
+      const code = String(d && d.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+      if (Rules.isFixtureCode(code)) { joinFixture(code).catch(e => console.error('[aurex-pen] fixture join failed:', e.message)); return; }
+      const r = rooms.get(code);
       if (!r || r.phase !== 'lobby') return socket.emit('err', { code: 'ROOM_NOT_FOUND', message: 'Room not found or already started.' });
       const i = seat(r, socket);      // joins his own team's side as the 2nd member (only registered members of that team can), or the free opposing side
       if (i < 0) return socket.emit('err', { code: 'ROOM_FULL', message: 'This room is full (or your team already has 2 players in it).' });

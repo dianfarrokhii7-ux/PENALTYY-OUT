@@ -102,3 +102,23 @@ CREATE TABLE IF NOT EXISTS aurex_pen_matches (
   CHECK (team_a <> team_b)
 );
 CREATE INDEX IF NOT EXISTS aurex_pen_matches_league_idx ON aurex_pen_matches(league, finished_at);
+
+-- AUREX PENALTY LEAGUE v2: scheduled fixtures with room codes + play-offs (additive; safe to re-run)
+ALTER TABLE aurex_pen_league ADD COLUMN IF NOT EXISTS phase TEXT;                -- NULL/'idle' | 'league' | 'playoffs' | 'finished'
+ALTER TABLE aurex_pen_league ADD COLUMN IF NOT EXISTS teams JSONB;               -- team ids that entered the league (frozen when the owner presses Start)
+ALTER TABLE aurex_pen_league ADD COLUMN IF NOT EXISTS champion_team INTEGER REFERENCES teams(id);
+ALTER TABLE aurex_pen_matches ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'friendly';   -- friendly | league | semi | final
+ALTER TABLE aurex_pen_matches ADD COLUMN IF NOT EXISTS fixture_id INTEGER;
+CREATE TABLE IF NOT EXISTS aurex_pen_fixtures (
+  id SERIAL PRIMARY KEY,
+  stage TEXT NOT NULL CHECK (stage IN ('league','semi','final')),
+  team_a INTEGER NOT NULL REFERENCES teams(id),
+  team_b INTEGER NOT NULL REFERENCES teams(id),
+  scheduled_at TIMESTAMPTZ,                  -- NULL until the owner announces the time
+  room_code TEXT NOT NULL UNIQUE,            -- chosen by the game; the room opens at scheduled_at
+  match_id TEXT UNIQUE REFERENCES aurex_pen_matches(id),
+  winner_team INTEGER REFERENCES teams(id),  -- NULL while unplayed or drawn
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (team_a <> team_b)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS aurex_pen_fixtures_pair_idx ON aurex_pen_fixtures(stage, LEAST(team_a, team_b), GREATEST(team_a, team_b));
