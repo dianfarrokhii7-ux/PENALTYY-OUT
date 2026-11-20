@@ -25,6 +25,9 @@ Table: win 3, draw 1, loss 0; tie-break goal difference, goals for, name. Leavin
 
 Room codes are visible only to the owner and to the two teams of that match. A fixture can carry exactly one result (database-enforced); nothing is ever counted twice. Everything the owner does is written to the activity log.
 
+## Deleting teams (owner)
+Owner panel → Teams: **Delete team completely** on a team, or tick several teams and press **Delete selected**. You must type `DELETE`. A deleted team disappears from the table, its penalty matches, fixtures, logo, club and the link to its players are removed; the players keep their accounts and can register a new team. If a deleted team is in the running league, the game asks a second time: the **whole league is reset** (all announced matches and league results erased, league can be started again). Logged as `team.delete`.
+
 ## AI referee + VAR (`aurex/pen-ai.js`)
 Rule-based and deterministic, run on the server (IFAB Law 14): goalkeeper off his line, illegal feint, goal-line (whole ball over the whole line). The on-field referee calls clear offences; **VAR is called only for suspicious kicks** (grey-zone keeper position, grey-zone feint, tight goal-line calls). The VAR verdict is what is stored.
 

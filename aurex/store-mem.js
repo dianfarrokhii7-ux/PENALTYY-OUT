@@ -90,6 +90,14 @@ function create() {
     },
     async setPenLeaguePhase(phase, champion) { S.penLeague.phase = phase; if (champion !== undefined) S.penLeague.champion = champion; },
     // fixtures: scheduled matches with a room code that opens at the announced time
+    /** Removes teams for good: members link, their penalty matches and fixtures. resetLeague wipes the whole league (fixtures, league results, state). */
+    async deleteTeams(ids, { resetLeague } = {}) {
+      const gone = new Set(ids), hit = m => gone.has(m.teamA) || gone.has(m.teamB);
+      if (resetLeague) { S.penFixtures = []; S.penMatches = S.penMatches.filter(m => m.fixtureId == null); S.penLeague = { startedAt: null, startedBy: null, phase: 'idle', teams: null, champion: null }; }
+      S.penFixtures = S.penFixtures.filter(f => !hit(f)); S.penMatches = S.penMatches.filter(m => !hit(m));
+      if (gone.has(S.penLeague.champion)) S.penLeague.champion = null;
+      S.members = S.members.filter(m => !gone.has(m.teamId)); S.teams = S.teams.filter(t => !gone.has(t.id));
+    },
     async createPenFixture({ stage, teamA, teamB, scheduledAt, roomCode }) {
       const key = [Math.min(teamA, teamB), Math.max(teamA, teamB)].join('-');
       if (S.penFixtures.some(f => f.stage === stage && [Math.min(f.teamA, f.teamB), Math.max(f.teamA, f.teamB)].join('-') === key)) return { kind: 'DUP_PAIR' };

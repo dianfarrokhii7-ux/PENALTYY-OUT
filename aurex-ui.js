@@ -239,7 +239,7 @@ function viewOwnerSetup() {
 }
 
 // ---------- owner panel ----------
-const ADMIN = { tab: 'teams', sel: null, filter: '' };
+const ADMIN = { tab: 'teams', sel: null, filter: '', checked: new Set() };
 async function viewAdmin(sub) {
   if (!S.me || S.me.role !== 'OWNER') return shell('admin', h('div', { class: 'banner bad' }, 'This area is for the tournament owner.'));
   ADMIN.tab = sub || 'teams';
@@ -254,6 +254,23 @@ async function viewAdmin(sub) {
     else await adminAudit(body);
   } catch (e) { body.replaceChildren(h('div', { class: 'banner bad' }, e.message)); }
 }
+/** Deletes teams for good (owner). Asks for DELETE; if the league is running it asks a second time because the league gets reset. */
+async function deleteTeamsFlow(ids, label, reload) {
+  const v = await ask({ title: 'Delete ' + label, text: 'Everything of the team(s) is removed for good: place in the table, penalty matches, announced fixtures, logo, club and the link to their players. The players keep their accounts and can register a new team. This cannot be undone.', fields: [{ name: 'confirm', label: 'Type DELETE to confirm' }], confirm: 'Delete', danger: true });
+  if (!v) return;
+  const go = reset => api('POST', '/admin/teams/delete', { ids, confirm: v.confirm.trim(), resetLeague: reset });
+  try {
+    let r;
+    try { r = await go(false); }
+    catch (e) {
+      if (e.code !== 'LEAGUE_RESET_REQUIRED') throw e;
+      const ok = await ask({ title: 'Reset the league?', text: e.message, confirm: 'Delete and reset league', danger: true }); if (!ok) return;
+      r = await go(true);
+    }
+    ids.forEach(id => ADMIN.checked.delete(id)); if (ids.includes(ADMIN.sel)) ADMIN.sel = null;
+    toast(r.deleted + (r.deleted === 1 ? ' team deleted' : ' teams deleted') + (r.leagueReset ? ' · league reset' : '')); await reload();
+  } catch (e) { toast(e.message, true); }
+}
 async function adminTeams(body) {
   const { teams } = await api('GET', '/admin/teams');
   const sel = teams.find(t => t.id === ADMIN.sel) || null;
@@ -262,7 +279,10 @@ async function adminTeams(body) {
   const shown = teams.filter(t => !ADMIN.filter || t.status === ADMIN.filter);
   body.replaceChildren(h('div', { class: 'split' },
     h('div', { class: 'list' }, h('div', { class: 'mb6' }, filter),
-      shown.length ? shown.map(t => h('button', { class: 'item', 'aria-pressed': String(ADMIN.sel === t.id), onclick: () => { ADMIN.sel = t.id; adminTeams(body); } }, crest(t, true), h('span', { class: 'grow' }, h('b', null, t.name), h('div', { class: 'muted small' }, t.members.map(m => m.username).join(' & '))), chip(t.status))) : h('p', { class: 'muted' }, 'No teams here.')),
+      shown.length ? h('div', { class: 'row mb6' },
+        h('label', { class: 'row' }, h('input', { type: 'checkbox', 'aria-label': 'Select all shown teams', checked: shown.every(t => ADMIN.checked.has(t.id)), onchange: ev => { shown.forEach(t => (ev.target.checked ? ADMIN.checked.add(t.id) : ADMIN.checked.delete(t.id))); adminTeams(body); } }), h('span', { class: 'muted small' }, 'Select all')),
+        ADMIN.checked.size ? h('button', { class: 'btn sm danger', onclick: () => deleteTeamsFlow([...ADMIN.checked], ADMIN.checked.size + (ADMIN.checked.size === 1 ? ' team' : ' teams'), () => adminTeams(body)) }, 'Delete selected (' + ADMIN.checked.size + ')') : null) : null,
+      shown.length ? shown.map(t => h('div', { class: 'row nowrap' }, h('input', { type: 'checkbox', 'aria-label': 'Select ' + t.name, checked: ADMIN.checked.has(t.id), onchange: ev => { ev.target.checked ? ADMIN.checked.add(t.id) : ADMIN.checked.delete(t.id); adminTeams(body); } }), h('button', { class: 'item', 'aria-pressed': String(ADMIN.sel === t.id), onclick: () => { ADMIN.sel = t.id; adminTeams(body); } }, crest(t, true), h('span', { class: 'grow' }, h('b', null, t.name), h('div', { class: 'muted small' }, t.members.map(m => m.username).join(' & '))), chip(t.status)))) : h('p', { class: 'muted' }, 'No teams here.')),
     sel ? teamDetail(sel, () => adminTeams(body)) : h('div', { class: 'panel muted' }, 'Pick a team to review it.')));
 }
 function teamDetail(t, reload) {
@@ -280,7 +300,8 @@ function teamDetail(t, reload) {
     h('h3', { class: 'm18-4' }, 'Members'),
     h('ul', { class: 'members' }, t.members.map(m => h('li', null, h('span', null, m.username), m.userId === t.captainId ? h('span', { class: 'cap' }, 'Captain') : (t.status !== 'rejected' ? h('button', { class: 'btn sm', onclick: () => act('captain', 'Captain changed', { userId: m.userId }) }, 'Make captain') : null)))),
     t.teamCode ? h('div', { class: 'row mt16' }, h('span', { class: 'lab' }, 'Team ID'), codeIn, h('button', { class: 'btn sm', onclick: () => act('team-id', 'Team ID updated', { teamCode: codeIn.value }) }, 'Save')) : null,
-    buttons.length ? h('div', { class: 'row mt20' }, buttons) : null);
+    buttons.length ? h('div', { class: 'row mt20' }, buttons) : null,
+    h('div', { class: 'row mt20' }, h('button', { class: 'btn danger', onclick: () => deleteTeamsFlow([t.id], t.name, reload) }, 'Delete team completely')));
 }
 async function adminPlayers(body) {
   const { players } = await api('GET', '/admin/players'), reload = () => adminPlayers(body);

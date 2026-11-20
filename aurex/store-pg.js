@@ -198,6 +198,22 @@ function create(url, env = process.env) {
       else await q('UPDATE aurex_pen_league SET phase = $1, champion_team = $2 WHERE id = 1', [phase, champion]);
     },
     // fixtures: scheduled matches with a room code that opens at the announced time
+    /** Removes teams for good (one transaction): their fixtures and penalty matches go too; resetLeague wipes the whole league. Members / club selection cascade. */
+    async deleteTeams(ids, { resetLeague } = {}) {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        if (resetLeague) {
+          await c.query('DELETE FROM aurex_pen_fixtures'); await c.query('DELETE FROM aurex_pen_matches WHERE fixture_id IS NOT NULL');
+          await c.query('UPDATE aurex_pen_league SET started_at = NULL, started_by = NULL, phase = NULL, teams = NULL, champion_team = NULL WHERE id = 1');
+        }
+        await c.query('DELETE FROM aurex_pen_fixtures WHERE team_a = ANY($1) OR team_b = ANY($1)', [ids]);
+        await c.query('DELETE FROM aurex_pen_matches WHERE team_a = ANY($1) OR team_b = ANY($1)', [ids]);
+        await c.query('UPDATE aurex_pen_league SET champion_team = NULL WHERE champion_team = ANY($1)', [ids]);
+        await c.query('DELETE FROM teams WHERE id = ANY($1)', [ids]);
+        await c.query('COMMIT');
+      } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+    },
     async createPenFixture({ stage, teamA, teamB, scheduledAt, roomCode }) {
       try {
         const r = await q('INSERT INTO aurex_pen_fixtures(stage, team_a, team_b, scheduled_at, room_code) VALUES ($1,$2,$3,$4,$5) RETURNING *', [stage, teamA, teamB, scheduledAt || null, roomCode]);

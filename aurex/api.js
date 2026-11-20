@@ -74,6 +74,7 @@ function createApi({ store, env = process.env }) {
   R('GET', '/admin/football-clubs', A, async c => ({ json: { clubs: await core.admin.listFootballClubs(c.user) } }));
   R('POST', `/admin/teams/${ID}/football-club`, A, async c => ({ json: await core.admin.selectFootballClub(c.user, +c.params.id, c.body) }));
   R('DELETE', `/admin/teams/${ID}/football-club`, A, async c => ({ json: await core.admin.releaseFootballClub(c.user, +c.params.id) }));
+  R('POST', '/admin/teams/delete', A, async c => ({ json: await core.admin.deleteTeams(c.user, c.body) }));
   R('POST', '/admin/pen/league/start', A, async c => ({ json: await core.admin.startPenLeague(c.user) }));
   R('POST', '/admin/pen/fixtures', A, async c => ({ status: 201, json: await core.admin.addPenFixture(c.user, c.body) }));
   R('POST', '/admin/pen/fixtures/generate', A, async c => ({ json: await core.admin.generatePenFixtures(c.user) }));

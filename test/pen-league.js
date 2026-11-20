@@ -122,5 +122,24 @@ const { createApi } = require('../aurex/api'); const mem = require('../aurex/sto
     cup = await w.core.penCup(); assert.strictEqual(cup.league.phase, 'finished'); assert.strictEqual(cup.league.champion.id, ids[2]);
     assert((await w.core.admin.listAudit(w.o)).some(e => e.action === 'pen.fixture.walkover'));
   }
+  // ---------- owner deletes teams: everything of them disappears; a running league needs an explicit reset ----------
+  {
+    const w = await mkWorld(5); const [A, B, C, D, E] = w.teams.map(t => t.id);
+    await w.store.recordPenMatch({ id: 'fr-1', teamA: D, teamB: E, goalsA: 3, goalsB: 1, result: 'A', reason: 'normal', league: false, stage: 'friendly' });
+    await assert.rejects(w.core.admin.deleteTeams({ ...w.teams[0].p1, role: 'PLAYER', status: 'active' }, { ids: [E], confirm: 'DELETE' }), /Owner access/);
+    await assert.rejects(w.core.admin.deleteTeams(w.o, { ids: [E], confirm: 'yes' }), /Type DELETE/); await assert.rejects(w.core.admin.deleteTeams(w.o, { ids: [] , confirm: 'DELETE' }), /Select/); await assert.rejects(w.core.admin.deleteTeams(w.o, { ids: [999999], confirm: 'DELETE' }), /no longer exists/);
+    // idle league: delete E (+ its friendly match) -> 4 teams left, the league can start
+    assert.deepStrictEqual(await w.core.admin.deleteTeams(w.o, { ids: [E], confirm: 'DELETE' }), { ok: true, deleted: 1, leagueReset: false });
+    assert.strictEqual(await w.store.getTeamById(E), null); assert.strictEqual((await w.core.penCup()).recent.length, 0, 'its matches are gone too'); assert.strictEqual((await w.core.penCup()).standings.length, 4);
+    assert.strictEqual(await w.store.getActiveTeamForUser(w.teams[4].p1.id), null, 'the players are free again');
+    await w.core.admin.startPenLeague(w.o); await w.core.admin.generatePenFixtures(w.o);
+    const fxs = await fixtures(w); for (const f of fxs.slice(0, 2)) await play(w, f, 2, 0);
+    await assert.rejects(w.core.admin.deleteTeams(w.o, { ids: [D], confirm: 'DELETE' }), e => e.code === 'LEAGUE_RESET_REQUIRED', 'a team of the running league: reset must be explicit');
+    assert.strictEqual((await w.store.getTeamById(D)).id, D, 'nothing was deleted without the reset flag');
+    assert.deepStrictEqual(await w.core.admin.deleteTeams(w.o, { ids: [C, D], confirm: 'DELETE', resetLeague: true }), { ok: true, deleted: 2, leagueReset: true });
+    const cup = await w.core.penCup(); assert.strictEqual(cup.league.started, false); assert.strictEqual(cup.league.phase, 'idle'); assert.strictEqual((await fixtures(w)).length, 0); assert.strictEqual((await w.store.allLeaguePenMatches()).length, 0);
+    assert.deepStrictEqual(cup.standings.map(r => r.teamId).sort(), [A, B].sort()); assert((await w.core.admin.listAudit(w.o)).some(e => e.action === 'team.delete'));
+    await assert.rejects(w.core.admin.startPenLeague(w.o), /4, 6 or 8/, 'two teams left: not enough for a league');
+  }
   console.log('pen-league ok');
 })().catch(e => { console.error(e); process.exit(1); });

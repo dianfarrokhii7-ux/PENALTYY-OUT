@@ -348,6 +348,19 @@ function createCore({ store, env = process.env }) {
       await audit(actor, 'pen.league.start', 'league', 1, { startedAt: r.startedAt, teams: teams.map(t => t.id) });
       return { ok: true, startedAt: r.startedAt, teams: teams.length };
     },
+    async deleteTeams(actor, b) {                  // owner: remove teams completely (table, fixtures, matches, members link, logo, club)
+      assertOwner(actor);
+      const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Number.isInteger))];
+      if (!ids.length || ids.length > 100) throw err(400, 'BAD_IDS', 'Select between 1 and 100 teams.');
+      if (b.confirm !== 'DELETE') throw err(400, 'CONFIRM_REQUIRED', 'Type DELETE to confirm.', { field: 'confirm' });
+      const teams = await Promise.all(ids.map(id => store.getTeamById(id))); if (teams.some(t => !t)) throw err(404, 'TEAM_NOT_FOUND', 'One of the teams no longer exists.');
+      const L = await store.getPenLeague(), inLeague = !!(L.started && L.teams && ids.some(id => L.teams.includes(id)));
+      if (inLeague && b.resetLeague !== true) throw err(409, 'LEAGUE_RESET_REQUIRED', 'At least one of these teams is in the running league. Deleting it RESETS the whole league: every announced match and league result is erased and the league can be started again.');
+      await store.deleteTeams(ids, { resetLeague: inLeague });
+      if (store.releaseFootballClub) for (const id of ids) await store.releaseFootballClub(id).catch(() => { });
+      await audit(actor, 'team.delete', 'team', ids[0], { ids, names: teams.map(t => t.name), leagueReset: inLeague });
+      return { ok: true, deleted: ids.length, leagueReset: inLeague };
+    },
     // --- announcing the matches: the owner picks the pairing and the time, the GAME picks the room code
     async addPenFixture(actor, b) {
       assertOwner(actor);
