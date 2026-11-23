@@ -19,7 +19,7 @@ const show = (id, on = true) => { const e = $(id); if (e) e.classList.toggle('hi
 
 /* ------------------------------------------------------------------ sound (synthesised, no files) */
 const Snd = (() => {
-  let ac = null, master = null, crowd = null;
+  let ac = null, master = null, crowd = null, ambG = null;
   const ctx = () => { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); master = ac.createGain(); master.gain.value = 0.5; master.connect(ac.destination); } catch (e) { return null; } } if (ac.state === 'suspended') ac.resume(); return ac; };
   const tone = (f, d, type = 'sine', v = 0.25, f2) => { const a = ctx(); if (!a) return; const o = a.createOscillator(), g = a.createGain(); o.type = type; o.frequency.setValueAtTime(f, a.currentTime); if (f2) o.frequency.exponentialRampToValueAtTime(f2, a.currentTime + d); g.gain.setValueAtTime(v, a.currentTime); g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + d); o.connect(g); g.connect(master); o.start(); o.stop(a.currentTime + d + 0.02); };
   const noise = (d, v = 0.3, hp = 400, lp = 6000) => { const a = ctx(); if (!a) return; const n = a.sampleRate * d, b = a.createBuffer(1, n, a.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * (1 - i / n); const s = a.createBufferSource(); s.buffer = b; const f = a.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = Math.sqrt(hp * lp); f.Q.value = 0.5; const g = a.createGain(); g.gain.value = v; s.connect(f); f.connect(g); g.connect(master); s.start(); };
@@ -35,7 +35,11 @@ const Snd = (() => {
     varIn() { tone(660, 0.15, 'square', 0.12); later(160, () => tone(880, 0.15, 'square', 0.12)); later(320, () => tone(1320, 0.25, 'square', 0.12)); },
     card() { tone(300, 0.3, 'sawtooth', 0.1, 220); },
     roar(big) { const a = ctx(); if (!a) return; if (crowd) { try { crowd.stop(); } catch (e) { } } const d = big ? 3.2 : 1.6, n = a.sampleRate * d, b = a.createBuffer(1, n, a.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) { const e = Math.sin(Math.PI * i / n); x[i] = (Math.random() * 2 - 1) * e; } const s = a.createBufferSource(); s.buffer = b; const f = a.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.4; const g = a.createGain(); g.gain.value = big ? 0.55 : 0.3; s.connect(f); f.connect(g); g.connect(master); s.start(); crowd = s; },
-    ambience() { const a = ctx(); if (!a || Snd._amb) return; const n = a.sampleRate * 3, b = a.createBuffer(1, n, a.sampleRate), x = b.getChannelData(0); let l = 0; for (let i = 0; i < n; i++) { l = (l + (Math.random() * 2 - 1) * 0.1) * 0.98; x[i] = l; } const s = a.createBufferSource(); s.buffer = b; s.loop = true; const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 700; const g = a.createGain(); g.gain.value = 0.35; s.connect(f); f.connect(g); g.connect(master); s.start(); Snd._amb = true; },
+    ambience() { const a = ctx(); if (!a || Snd._amb) return; const n = a.sampleRate * 3, b = a.createBuffer(1, n, a.sampleRate), x = b.getChannelData(0); let l = 0; for (let i = 0; i < n; i++) { l = (l + (Math.random() * 2 - 1) * 0.1) * 0.98; x[i] = l; } const s = a.createBufferSource(); s.buffer = b; s.loop = true; const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 700; const g = a.createGain(); g.gain.value = 0.35; ambG = g; s.connect(f); f.connect(g); g.connect(master); s.start(); Snd._amb = true; },
+    // crowd reactions + sudden-death tension
+    gasp() { const a = ctx(); if (!a) return; const d = 1.1, n = Math.floor(a.sampleRate * d), b = a.createBuffer(1, n, a.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * Math.sin(Math.PI * Math.pow(i / n, 0.6)); const s = a.createBufferSource(); s.buffer = b; const f = a.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.2; f.frequency.setValueAtTime(950, a.currentTime); f.frequency.exponentialRampToValueAtTime(420, a.currentTime + d); const g = a.createGain(); g.gain.value = 0.55; s.connect(f); f.connect(g); g.connect(master); s.start(); },
+    crowd(v, secs) { if (ambG && ac) ambG.gain.setTargetAtTime(v, ac.currentTime, secs || 0.4); },
+    heart(on) { if (Snd._hb) { clearInterval(Snd._hb); Snd._hb = null; } if (!on) return; const beat = () => { tone(62, 0.16, 'sine', 0.55, 38); setTimeout(() => tone(56, 0.14, 'sine', 0.4, 34), 190); }; beat(); Snd._hb = setInterval(beat, 860); },
   };
 })();
 
@@ -170,6 +174,15 @@ function syncClock() {
 
 function applyScore(d) { if (d.kicks) { st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first != null ? d.first : st.first }; } if (d.cards) cards = d.cards; renderBoard(); }
 
+async function shareResult() {
+  const d = lastEnd, b = $('bShare'); if (!d || !window.AurexShare) return; b.disabled = true; $('shareMsg').textContent = 'Preparing the card…';
+  try {
+    const note = $('endWhy').textContent.replace(/\s*\(Warning:.*$/, '');
+    const card = await AurexShare.matchCard({ teamA: players[0].team, teamB: players[1].team, goalsA: d.table[0], goalsB: d.table[1], stage: d.stage || 'friendly', winnerSide: d.winner == null ? null : d.winner, note });
+    const r = await AurexShare.share(card, 'aurex-' + (players[0].team.name + '-vs-' + players[1].team.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'), `${players[0].team.name} ${d.table[0]}–${d.table[1]} ${players[1].team.name} · AUREX Penalty Cup`);
+    $('shareMsg').textContent = r === 'downloaded' ? 'Card saved as an image.' : r === 'shared' ? 'Shared!' : '';
+  } catch (e) { $('shareMsg').textContent = 'Could not create the card.'; } finally { b.disabled = false; }
+}
 function onMatchStart(d) {
   started = true; league = d.league; stage = d.stage || (d.league ? 'league' : 'friendly'); players = d.players; phase = 'intro';
   st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: d.first }; $('menu').classList.add('off'); show('hud', true); show('pad', false); Snd.unlock(); Snd.ambience();
@@ -196,9 +209,21 @@ function onSync(d) {
   if (d.turn && d.phase === 'aim') onTurn({ ...d.turn, ...d, k: d.turn.k }); else { phase = d.phase; Gfx.camera('result', true); text('hint', 'Reconnected — next kick coming up…'); }
 }
 
+/** Sudden death: both sides have taken their 5 kicks. The second kick of a round decides it (or sends it on). Returns null before sudden death. */
+function pressureFor(d) {
+  if (!(st.kicks[0] >= 5 && st.kicks[1] >= 5)) return null;
+  const s = d.shooter, o = 1 - s, second = st.kicks[o] > st.kicks[s], theirs = second && st.log[o] && st.log[o][st.kicks[s]], oScored = !!(theirs && theirs.res === 'goal');
+  let tag = 'SUDDEN DEATH';
+  if (second) { if (role === 'shooter') tag = oScored ? 'SCORE OR LOSE' : 'SCORE TO WIN'; else if (role === 'keeper') tag = oScored ? 'SAVE TO WIN' : 'SAVE OR LOSE'; else tag = 'SUDDEN DEATH · DECIDING KICK'; }
+  return { hot: second, tag };
+}
+function setPressure(p) {
+  const hud = $('hud'); hud.classList.toggle('sd', !!p); hud.classList.toggle('hot', !!(p && p.hot)); show('sdTag', !!p); if (p) text('sdTag', p.tag);
+  Snd.heart(!!(p && p.hot)); Snd.crowd(p ? (p.hot ? 0.1 : 0.22) : 0.35, 0.6);
+}
 function onTurn(d) {
   clearLater(); hideCard(); show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); turn = d; phase = 'aim'; started = true; role = d.shooterUser === uid ? 'shooter' : d.keeperUser === uid ? 'keeper' : 'spectator'; sent = false; charging = false; power = 0; aim = { ax: 0, ay: 0.4, curve: 0 }; ballAll = []; runInfo = null; lastKin = '0,0';
-  applyScore(d); show('var', false); show('callbox', false); $('banner').classList.remove('show'); show('runbar', false);
+  applyScore(d); show('var', false); show('callbox', false); $('banner').classList.remove('show'); show('runbar', false); setPressure(pressureFor(d));
   Gfx.clearTurn(); Gfx.setRole(role, actorOf(d.shooterUser), actorOf(d.keeperUser)); Gfx.keeperSnap(0, 0); Gfx.camera(role === 'keeper' ? 'keeper' : 'shooter', true);
   Gfx.setAim(aim.ax, aim.ay, 0, role === 'shooter', 0); Gfx.crowdCheer(false);
   $('role').innerHTML = roleText(); show('power', role === 'shooter'); show('curveui', role === 'shooter'); $('power').firstElementChild.style.width = '0%'; updateCurveUI();
@@ -208,7 +233,7 @@ function onTurn(d) {
   later(d.whistleAt - srv(), () => { if (phase === 'aim') { Snd.whistle(); Gfx.refSignal('whistle'); text('hint', role === 'shooter' ? 'WHISTLE — you can shoot!' : 'WHISTLE — the kicker is about to shoot'); } });
 }
 function onKick(d) {
-  phase = 'flight'; strikeAt = d.strikeAt; Gfx.setStrike(d.strikeAt); Gfx.camera(role === 'keeper' ? 'flightK' : 'flightS'); show('runbar', false); show('power', false); text('hint', '');
+  Snd.heart(false); phase = 'flight'; strikeAt = d.strikeAt; Gfx.setStrike(d.strikeAt); Gfx.camera(role === 'keeper' ? 'flightK' : 'flightS'); show('runbar', false); show('power', false); text('hint', '');
   Gfx.keeperTo(d.keeper.x, d.keeper.kz); later(d.strikeAt - srv(), () => { Snd.kick(); }); Gfx.shake(0.02);
 }
 function onBall(d) {
@@ -231,8 +256,12 @@ function onResult(d) {
   else if (final === 'post') { banner('OFF THE POST!' + sub, '#ffd23f', 2400); Gfx.react('miss', sa, ka); Snd.roar(false); }
   else { banner((d.timeout ? 'TOO SLOW!' : 'MISSED!') + sub, '#ff6b86', 2400); Gfx.react('miss', sa, ka); }
   text('hint', '');
+  Snd.heart(false); Snd.crowd(0.35, 0.8); if (final === 'post' || (final === 'save' && $('hud').classList.contains('sd'))) later(350, () => Snd.gasp());
+  later(2300, () => { if (phase === 'result') $('hud').classList.remove('hot'); });
 }
+let lastEnd = null;
 function onEnd(d) {
+  lastEnd = d; $('shareMsg').textContent = ''; Snd.heart(false); Snd.crowd(0.35, 0.8); $('hud').classList.remove('sd', 'hot'); show('sdTag', false);
   phase = 'end'; clearLater(); hideCard(); show('var', false); show('callbox', false); show('pad', false); text('role', ''); text('hint', ''); text('conn', ''); applyScore(d); Gfx.setAim(0, 0, 0, false, 0); Gfx.camera('end');
   const win = d.winner === me, draw = d.winner == null; text('endTitle', draw ? 'DRAW' : win ? 'VICTORY' : 'DEFEAT'); text('endScore', `${d.table[0]} – ${d.table[1]}`);
   text('endTeams', `${players[0].team.name}  vs  ${players[1].team.name}`);
@@ -304,6 +333,7 @@ function bindUI() {
   $('bLeave').onclick = () => { sock.emit('leave'); setScreen('scrHome'); me = -1; };
   $('bReady').onclick = () => { Snd.unlock(); sock.emit('ready'); $('bReady').disabled = true; };
   addEventListener('contextmenu', e => e.preventDefault());
+  $('bShare').onclick = shareResult;
   bindFullscreen();
 }
 function bindFullscreen() {

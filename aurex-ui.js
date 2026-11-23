@@ -339,7 +339,7 @@ function cupTable(rows, started) {
     h('thead', null, h('tr', null, cols.map(c => h('th', null, c)))),
     h('tbody', null, rows.map(r => h('tr', null,
       h('td', null, started || r.played ? r.rank : '–'),
-      h('td', null, h('div', { class: 'row' }, crest(r, true), h('b', null, r.name))),
+      h('td', null, h('div', { class: 'row' }, crest({ id: r.teamId, name: r.name, hasLogo: r.hasLogo }, true), h('b', null, r.name))),
       ...[r.played, r.won, r.drawn, r.lost, r.gf, r.ga, (r.gd > 0 ? '+' : '') + r.gd].map(v => h('td', null, v)),
       h('td', null, h('b', null, r.points)),
       h('td', null, (r.form || []).map(f => h('span', { class: 'chip ' + f }, f))))))));
@@ -374,7 +374,8 @@ function fixtureTable(list, admin, reload) {
     if (!admin) {
       const act = f.mine && !f.played ? h('div', { class: 'row' }, f.roomCode ? h('span', { class: 'chip code' }, f.roomCode) : null,
         h('a', { class: 'btn sm primary' + (f.open ? '' : ' disabled'), href: f.open ? '/aurex-pen?room=' + encodeURIComponent(f.roomCode) : null, 'aria-disabled': f.open ? null : 'true' }, f.open ? 'Enter match' : 'Opens at the announced time')) : null;
-      return h('tr', null, stageCell, matchCell, h('td', null, f.scheduledAt ? fmtWhen(f.scheduledAt) : h('span', { class: 'muted' }, 'To be announced')), h('td', null, fxStatus(f)), h('td', null, act));
+      const share = f.played && f.score && window.AurexShare ? h('button', { class: 'btn sm', type: 'button', onclick: () => shareFixture(f) }, 'Share card') : null;
+      return h('tr', null, stageCell, matchCell, h('td', null, f.scheduledAt ? fmtWhen(f.scheduledAt) : h('span', { class: 'muted' }, 'To be announced')), h('td', null, fxStatus(f)), h('td', null, act || share));
     }
     const when = h('input', { type: 'datetime-local', value: toLocalInput(f.scheduledAt), 'aria-label': 'Match time', disabled: f.played });
     const save = h('button', { class: 'btn sm', disabled: f.played, onclick: () => run(api('POST', `/admin/pen/fixtures/${f.id}/schedule`, { scheduledAt: fromLocalInput(when.value) }), 'Time saved', reload) }, 'Save');
@@ -389,29 +390,133 @@ function fixtureTable(list, admin, reload) {
 }
 function leagueBanner(d) {
   const L = d.league, p = d.progress;
-  if (L.phase === 'finished' && L.champion) return h('div', { class: 'banner good mb14' }, h('b', null, 'CHAMPION: ' + L.champion.name + '. '), 'The AUREX Penalty League is finished.');
+  if (L.phase === 'finished' && L.champion) return h('div', { class: 'banner good mb14 row' }, h('span', { class: 'grow' }, h('b', null, 'CHAMPION: ' + L.champion.name + '. '), 'The AUREX Penalty League is finished.'), h('button', { class: 'btn sm', type: 'button', onclick: () => showCeremony(d) }, 'Replay ceremony'));
   if (L.phase === 'playoffs') return h('div', { class: 'banner good mb14' }, h('b', null, 'Play-offs. '), 'The round robin is over. Semi-finals and final are announced below. ', formatNote(L.teamCount));
   if (L.phase === 'league') return h('div', { class: 'banner good mb14' }, h('b', null, `The league is LIVE — ${p.leaguePlayed} of ${p.leagueTotal} league matches played. `), 'Win 3 · draw 1 · loss 0. Only the matches the owner announces count; room matches stay friendlies. ', formatNote(L.teamCount));
   return h('div', { class: 'banner warn mb14' }, 'The league has not started yet. Penalty duels from the lobby are friendlies and never count. ' + formatNote(0));
+}
+
+const nameSlug = x => String(x).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+async function shareFixture(f) {
+  try {
+    const win = f.winnerTeamId == null || f.drawn ? null : f.winnerTeamId === f.teamA.id ? 0 : 1, adv = f.stage !== 'league' && f.winnerTeamId ? (f.winnerTeamId === f.teamA.id ? f.teamA : f.teamB).name + ' go through' + (f.drawn ? ' (higher seed)' : '') : '';
+    const note = [adv, RES_LABEL[f.score.reason] ? RES_LABEL[f.score.reason][0].toUpperCase() + RES_LABEL[f.score.reason].slice(1) : ''].filter(Boolean).join(' · ');
+    const card = await AurexShare.matchCard({ teamA: f.teamA, teamB: f.teamB, goalsA: f.score.a, goalsB: f.score.b, stage: f.stage, winnerSide: win, note, when: f.scheduledAt ? new Date(f.scheduledAt).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' }) : undefined });
+    const r = await AurexShare.share(card, 'aurex-' + nameSlug(f.teamA.name + '-vs-' + f.teamB.name), `${f.teamA.name} ${f.score.a}–${f.score.b} ${f.teamB.name} · AUREX Penalty Cup`);
+    if (r === 'downloaded') toast('Card saved as an image'); else if (r === 'shared') toast('Shared');
+  } catch (e) { toast('Could not create the card', true); }
+}
+
+// ---------- next match card with a live countdown ----------
+const pad2 = n => String(n).padStart(2, '0');
+function fmtCountdown(ms) { const t = Math.max(0, Math.floor(ms / 1000)), dd = Math.floor(t / 86400), hh = Math.floor(t % 86400 / 3600), mm = Math.floor(t % 3600 / 60), ss = t % 60; return (dd ? dd + 'd ' : '') + pad2(hh) + ':' + pad2(mm) + ':' + pad2(ss); }
+function nextMatchCard(d, onOpen) {
+  const open = d.fixtures.filter(f => !f.played), mine = open.filter(f => f.mine), pool = mine.length ? mine : open.filter(f => f.scheduledAt);
+  const f = pool.slice().sort((a, b) => (a.scheduledAt ? +new Date(a.scheduledAt) : Infinity) - (b.scheduledAt ? +new Date(b.scheduledAt) : Infinity))[0]; if (!f) return null;
+  const off = Date.parse(d.serverNow) - Date.now(), when = f.scheduledAt ? +new Date(f.scheduledAt) : null, isMine = !!f.mine;
+  const cd = h('div', { class: 'nc-cd', role: 'timer' }), label = h('div', { class: 'nc-label muted' });
+  const enter = isMine ? h('a', { class: 'btn primary nc-enter disabled', 'aria-disabled': 'true' }, 'Enter match') : null;
+  const card = h('section', { class: 'nextcard' + (isMine ? ' mine' : '') },
+    h('div', { class: 'row nc-top' }, h('span', { class: 'chip ' + (f.stage === 'league' ? 'approved' : 'active') }, STAGE_NAME[f.stage]), h('b', null, isMine ? 'Your next match' : 'Next match')),
+    h('div', { class: 'nc-teams' }, h('div', { class: 'nc-team' }, crest(f.teamA), h('b', null, f.teamA.name)), h('div', { class: 'nc-vs' }, 'VS'), h('div', { class: 'nc-team' }, crest(f.teamB), h('b', null, f.teamB.name))),
+    h('div', { class: 'nc-when' }, f.scheduledAt ? fmtWhen(f.scheduledAt) : 'Time to be announced'), cd, label,
+    isMine ? h('div', { class: 'row nc-act' }, f.roomCode ? h('span', { class: 'chip code' }, f.roomCode) : null, enter) : null);
+  let opened = false;
+  const tick = () => {
+    if (when == null) { cd.textContent = '--:--:--'; label.textContent = 'The owner has not announced the time yet.'; return; }
+    const left = when - (Date.now() + off);
+    if (left > 0) { cd.textContent = fmtCountdown(left); cd.classList.remove('live'); label.textContent = isMine ? 'The room opens at the announced time.' : 'Kick-off countdown'; return; }
+    cd.textContent = 'ROOM OPEN'; cd.classList.add('live'); label.textContent = isMine ? 'Both teams can enter now.' : 'This match is open now.';
+    if (enter && f.roomCode) { enter.setAttribute('href', '/aurex-pen?room=' + encodeURIComponent(f.roomCode)); enter.removeAttribute('aria-disabled'); enter.classList.remove('disabled'); }
+    if (!opened) { opened = true; if (!f.open && onOpen) onOpen(); }      // the server's own "open" flag is refreshed once
+  };
+  const timer = setInterval(() => { if (!document.body.contains(card)) return clearInterval(timer); tick(); }, 1000); tick(); return card;
+}
+
+// ---------- play-off bracket ----------
+const ORD = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
+function bracketView(d) {
+  const n = d.league.teamCount; if (!d.league.started || (n !== 6 && n !== 8)) return null;
+  const seeds = d.standings, anyPlayed = seeds.some(r => r.played > 0), fixed = d.league.phase !== 'league';
+  const seed = i => { const r = seeds[i]; return r ? { id: r.teamId, name: r.name, hasLogo: r.hasLogo } : null; };
+  const semis = d.fixtures.filter(f => f.stage === 'semi'), fin = d.fixtures.find(f => f.stage === 'final');
+  const byPair = (a, b) => semis.find(f => (f.teamA.id === a.id && f.teamB.id === b.id) || (f.teamA.id === b.id && f.teamB.id === a.id));
+  const fxRows = f => [[f.teamA, f.score && f.score.a], [f.teamB, f.score && f.score.b]].map(([t, sc]) => ({ team: t, score: sc == null ? null : sc, win: f.played && f.winnerTeamId === t.id }));
+  const projRows = (i, j) => [i, j].map(k => ({ team: anyPlayed || fixed ? seed(k) : null, label: ORD[k] + ' place', proj: !fixed }));
+  const semiCard = (title, i, j) => { const a = seed(i), b = seed(j), f = fixed && a && b ? byPair(a, b) : null; return { title, f, rows: f ? fxRows(f) : projRows(i, j), win: f && f.played ? (f.winnerTeamId === f.teamA.id ? f.teamA : f.teamB) : null }; };
+  const cards = n === 8 ? [semiCard('Semi-final 1', 0, 3), semiCard('Semi-final 2', 1, 2)] : [semiCard('Semi-final', 1, 2)];
+  const winRow = (c, label) => ({ team: c.win, label, proj: false });
+  const finalRows = fin ? fxRows(fin) : n === 8 ? [winRow(cards[0], 'Winner SF1'), winRow(cards[1], 'Winner SF2')] : [{ team: fixed || anyPlayed ? seed(0) : null, label: '1st place', proj: !fixed }, winRow(cards[0], 'Winner of the semi-final')];
+  const meta = f => (!f ? 'Not set yet' : f.played ? 'Played' : f.scheduledAt ? fmtWhen(f.scheduledAt) : 'Time to be announced');
+  const row = r => h('div', { class: 'bk-team' + (r.win ? ' win' : '') + (r.proj ? ' proj' : '') }, r.team ? crest(r.team, true) : h('span', { class: 'bk-ph' }), h('span', { class: 'bk-name' }, r.team ? r.team.name : r.label), r.score != null ? h('b', { class: 'bk-sc' }, r.score) : null);
+  const card = (title, rows, f) => h('div', { class: 'bk-card' + (f && f.mine ? ' mine' : '') + (f && f.open ? ' open' : '') }, h('div', { class: 'bk-title' }, h('span', null, title), h('span', { class: 'muted' }, meta(f))), rows.map(row));
+  const col1 = n === 8 ? cards.map(c => card(c.title, c.rows, c.f)) : [h('div', { class: 'bk-card bye' }, h('div', { class: 'bk-title' }, h('span', null, 'Direct to the final'), h('span', { class: 'muted' }, '1st place')), row({ team: fixed || anyPlayed ? seed(0) : null, label: '1st place', proj: !fixed })), card(cards[0].title, cards[0].rows, cards[0].f)];
+  const champ = d.league.champion;
+  return h('div', { class: 'panel bkwrap' }, h('div', { class: 'bk', role: 'group', 'aria-label': 'Play-off bracket' },
+    h('div', { class: 'bk-col semis' }, h('div', { class: 'bk-head' }, 'Semi-finals'), col1),
+    h('div', { class: 'bk-col' }, h('div', { class: 'bk-head' }, 'Final'), card('Final', finalRows, fin)),
+    h('div', { class: 'bk-col' }, h('div', { class: 'bk-head' }, 'Champion'), h('div', { class: 'bk-card champ' + (champ ? ' won' : '') }, champ ? [crest(champ), h('b', null, champ.name)] : [h('div', { class: 'bk-trophy', 'aria-hidden': 'true' }, '🏆'), h('span', { class: 'muted' }, 'To be decided')]))),
+    fixed ? null : h('p', { class: 'muted small mt6' }, 'Projected from the current table — the real pairings are set when the round robin ends.'));
+}
+
+// ---------- champions ceremony ----------
+const TROPHY = '<svg class="cer-trophy" viewBox="0 0 120 140" aria-hidden="true"><defs><linearGradient id="gtr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff1b8"/><stop offset=".5" stop-color="#e8b84a"/><stop offset="1" stop-color="#a8741a"/></linearGradient></defs><path d="M30 10h60v34c0 22-14 34-30 38-16-4-30-16-30-38z" fill="url(#gtr)"/><path d="M30 18H14c0 22 8 34 22 38M90 18h16c0 22-8 34-22 38" fill="none" stroke="#e8b84a" stroke-width="7" stroke-linecap="round"/><rect x="54" y="82" width="12" height="26" fill="url(#gtr)"/><path d="M34 128h52l-8-20H42z" fill="url(#gtr)"/></svg>';
+function startConfetti(cv) {
+  const ctx = cv.getContext('2d'), colors = ['#e8b84a', '#5b95ff', '#ffffff', '#41e0a0', '#ff6b86']; let w = 0, hh = 0, raf = 0, dead = false; const parts = [], t0 = performance.now();
+  const size = () => { w = cv.width = innerWidth; hh = cv.height = innerHeight; }; size(); addEventListener('resize', size);
+  const spawn = k => { for (let i = 0; i < k; i++) parts.push({ x: Math.random() * w, y: -20 - Math.random() * hh * 0.3, vx: (Math.random() - 0.5) * 2.2, vy: 2 + Math.random() * 3.2, r: 6 + Math.random() * 8, a: Math.random() * 6.28, va: (Math.random() - 0.5) * 0.3, c: colors[Math.floor(Math.random() * colors.length)], k: 0.5 + Math.random() * 0.5 }); };
+  spawn(170);
+  const tick = now => {
+    if (dead) return; ctx.clearRect(0, 0, w, hh); const el = now - t0; if (el < 7000) spawn(3);
+    for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.x += p.vx + Math.sin(p.y / 40) * 0.6; p.y += p.vy; p.a += p.va; if (p.y > hh + 24) { parts.splice(i, 1); continue; } ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a); ctx.fillStyle = p.c; ctx.fillRect(-p.r / 2, -p.r * p.k / 2, p.r, p.r * p.k); ctx.restore(); }
+    if (el < 7000 || parts.length) raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  return () => { dead = true; cancelAnimationFrame(raf); removeEventListener('resize', size); };
+}
+function showCeremony(d) {
+  const c = d.league.champion; if (!c || document.querySelector('.cer')) return;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches, canvas = h('canvas', { class: 'cer-conf', 'aria-hidden': 'true' }), trophy = h('div', { class: 'cer-trophywrap' });
+  trophy.innerHTML = TROPHY;
+  const prev = document.activeElement; let stop = null;
+  const close = () => { if (stop) stop(); document.removeEventListener('keydown', onKey); ov.remove(); if (prev && prev.focus) prev.focus(); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  const closeBtn = h('button', { class: 'btn primary', type: 'button', onclick: close }, 'Close');
+  const shareBtn = window.AurexShare ? h('button', { class: 'btn', type: 'button', onclick: async () => {
+    try { const card = await AurexShare.championCard({ team: c, subtitle: 'Winners of the AUREX Penalty League' }); const r = await AurexShare.share(card, 'aurex-champions-' + nameSlug(c.name), c.name + ' are the AUREX Penalty Cup champions!'); if (r === 'downloaded') toast('Card saved as an image'); }
+    catch (e) { toast('Could not create the card', true); } } }, 'Share champion card') : null;
+  const ov = h('div', { class: 'cer', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Champions: ' + c.name }, canvas,
+    h('div', { class: 'cer-body' }, trophy, h('img', { class: 'cer-crest', alt: c.hasLogo ? c.name + ' logo' : '', src: c.hasLogo ? logoUrl(c) : 'aurex-logo-sm.png' }),
+      h('p', { class: 'cer-kick' }, 'AUREX PENALTY CUP'), h('h2', { class: 'cer-title' }, 'CHAMPIONS'), h('p', { class: 'cer-name' }, c.name), h('div', { class: 'row cer-act' }, shareBtn, closeBtn)));
+  document.body.append(ov); document.addEventListener('keydown', onKey); closeBtn.focus(); if (!reduce) stop = startConfetti(canvas);
+}
+function maybeCeremony(d) {
+  const L = d.league; if (L.phase !== 'finished' || !L.champion) return;
+  const key = 'aurex.cer.' + L.champion.id + '.' + (L.startedAt || '');
+  try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch (_) { /* storage blocked: show it each visit */ }
+  showCeremony(d);
 }
 async function viewCup() {
   const body = h('div', null, h('p', { class: 'muted' }, 'Loading…'));
   shell('cup', h('h2', null, 'AUREX Penalty Cup'), body);
   clearInterval(cupTimer);
   const load = async () => {
-    const d = await api('GET', '/pen/cup'), my = S.team && S.team.status === 'active', mineNext = d.fixtures.filter(f => f.mine && !f.played);
-    body.replaceChildren(
-      leagueBanner(d),
-      mineNext.length ? h('section', { class: 'panel mb14' }, h('h3', { class: 'mb6' }, 'Your next league match'),
-        h('p', { class: 'muted mb14' }, 'The room opens at the announced time. Both teams enter with the room code (only your two teams can get in).'), fixtureTable(mineNext, false)) : null,
+    const d = await api('GET', '/pen/cup'), my = S.team && S.team.status === 'active';
+    const nextCard = nextMatchCard(d, () => load().catch(() => { })), bracket = bracketView(d);
+    body.replaceChildren(h('div', null,
+      leagueBanner(d), nextCard,
+      bracket ? [h('h3', { class: 'mt14 mb6' }, 'Play-offs'), bracket] : null,
       d.league.started ? [h('h3', { class: 'mt14 mb6' }, 'Matches'), fixtureTable(d.fixtures, false)] : null,
       h('h3', { class: 'mt14 mb6' }, 'Table'), cupTable(d.standings, d.league.started),
       h('section', { class: 'panel mt14 mb14' }, h('h3', { class: 'mb6' }, 'Friendly duel'),
         h('p', { class: 'muted mb14' }, 'Practise against another team in a private room or the quick queue. Friendlies never count. One shoots, one keeps goal, then you swap. Five kicks each, sudden death if level, a draw if it is still level after ten kicks each. An AI referee and VAR watch every kick.'),
         h('div', { class: 'row' }, h('a', { class: 'btn' + (my ? '' : ' disabled'), href: my ? '/aurex-pen' : null, 'aria-disabled': my ? null : 'true' }, 'Play a friendly'), my ? null : h('span', { class: 'muted' }, 'Your team must be active to play.'))),
-      h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent));
+      h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent)));
+    return d;
   };
-  try { await load(); } catch (e) { body.replaceChildren(h('div', { class: 'banner bad' }, e.message)); return; }
+  let first = null;
+  try { first = await load(); } catch (e) { body.replaceChildren(h('div', { class: 'banner bad' }, e.message)); return; }
+  try { maybeCeremony(first); } catch (_) { }
   cupTimer = setInterval(() => { if (location.hash.replace(/^#\/?/, '').split('/')[0] !== 'cup') return clearInterval(cupTimer); load().catch(() => { }); }, 15000);
 }
 async function adminLeague(body) {
@@ -434,6 +539,7 @@ async function adminLeague(body) {
     L.phase === 'league' ? h('div', null, h('h3', { class: 'mb6' }, 'Announce a match'),
       h('p', { class: 'muted mb14' }, `${d.progress.leagueAnnounced} of ${d.progress.leagueTotal} league matches announced. Pick the two teams and the time; the game chooses the room code, which opens at that time. Leave the time empty to set it later.`),
       h('div', { class: 'row mb14' }, selA, selB, when, add), h('div', { class: 'mb14' }, gen)) : null,
+    bracketView(d) ? [h('h3', { class: 'mt14 mb6' }, 'Play-offs'), bracketView(d)] : null,
     h('h3', { class: 'mt14 mb6' }, 'Matches and room codes'), fixtureTable(d.fixtures, true, reload),
     h('h3', { class: 'mt14 mb6' }, 'Table'), cupTable(d.standings, true), h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent)));
 }

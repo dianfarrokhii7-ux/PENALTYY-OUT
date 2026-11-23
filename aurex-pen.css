@@ -33,6 +33,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--n950);color:var(
 .modetag{position:absolute;left:50%;top:101%;transform:translateX(-50%);padding:3px 12px;border-radius:99px;font:700 calc(var(--w)*.0165)/1.2 var(--head);letter-spacing:.1em;white-space:nowrap;background:rgba(4,9,22,.78);border:1px solid rgba(203,211,225,.35);color:var(--silver)}
 .modetag.league{color:#06210f;background:var(--good);border-color:#c9ffe9}
 /* ---- on-screen info */
+/* ---- sudden death: darker edges, a throbbing red rim and a tag on the decisive kick */
+#pressure{position:absolute;inset:0;opacity:0;transition:opacity .7s;background:radial-gradient(ellipse at 50% 55%,rgba(0,0,0,0) 40%,rgba(2,4,12,.78) 100%)}
+#hud.sd #pressure{opacity:1}
+#hud.hot #pressure{background:radial-gradient(ellipse at 50% 55%,rgba(0,0,0,0) 35%,rgba(70,0,12,.78) 100%);animation:throb .86s ease-in-out infinite}
+@keyframes throb{0%,100%{opacity:.75}12%{opacity:1}30%{opacity:.8}42%{opacity:1}}
+#sdTag{position:absolute;left:50%;top:calc(max(6px,env(safe-area-inset-top)) + var(--w)*.398 + 34px);transform:translateX(-50%);padding:5px 18px;border-radius:99px;font:800 calc(var(--w)*.026)/1.2 var(--head);letter-spacing:.14em;white-space:nowrap;color:#fff;background:rgba(10,14,34,.86);border:1px solid var(--gold);box-shadow:0 0 18px rgba(255,210,63,.35)}
+#hud.hot #sdTag{border-color:#ff5470;color:#ffd0d8;box-shadow:0 0 22px rgba(255,84,112,.6);animation:tagpulse .86s ease-in-out infinite}
+@keyframes tagpulse{50%{transform:translateX(-50%) scale(1.07)}}
+@media (prefers-reduced-motion:reduce){#hud.hot #pressure,#hud.hot #sdTag{animation:none}}
 #role{position:absolute;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(92vw,700px);text-align:center;padding:9px 16px;border-radius:10px;background:rgba(4,9,22,.72);border:1px solid rgba(91,149,255,.35);font:600 15px/1.35 var(--body);backdrop-filter:blur(4px)}
 #role b{color:var(--gold)}
 #banner{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%) scale(.6);font:800 min(14vw,96px)/1 var(--head);letter-spacing:.04em;text-transform:uppercase;opacity:0;white-space:nowrap;text-shadow:0 0 30px currentColor,0 6px 24px rgba(0,0,0,.7);transition:transform .25s cubic-bezier(.2,1.4,.4,1),opacity .2s}

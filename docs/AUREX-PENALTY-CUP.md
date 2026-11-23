@@ -25,6 +25,13 @@ Table: win 3, draw 1, loss 0; tie-break goal difference, goals for, name. Leavin
 
 Room codes are visible only to the owner and to the two teams of that match. A fixture can carry exactly one result (database-enforced); nothing is ever counted twice. Everything the owner does is written to the activity log.
 
+## Cup page extras
+- **Next match card** with a live countdown (server clock); at the announced time it switches to *ROOM OPEN* and enables **Enter match** for the two teams.
+- **Play-off bracket** (6 and 8 teams): projected from the current table during the round robin, real pairings and scores afterwards, champion slot at the end.
+- **Champions ceremony:** trophy, crest, confetti, shown once per browser when the league finishes (button *Replay ceremony*; reduced-motion users get no confetti).
+- **Share cards:** 1080×1350 PNG (`aurex-share.js`) of any played match, of the final result on the match end screen, and of the champions. Uses the share sheet on phones, a download elsewhere.
+- **Sudden death in the match:** darker edges, a throbbing red rim and a tag (`SCORE OR LOSE`, `SCORE TO WIN`, `SAVE TO WIN`, `SAVE OR LOSE`) on the deciding kick, a heartbeat and a hushed crowd, a gasp on a post or a late save.
+
 ## Deleting teams (owner)
 Owner panel → Teams: **Delete team completely** on a team, or tick several teams and press **Delete selected**. You must type `DELETE`. A deleted team disappears from the table, its penalty matches, fixtures, logo, club and the link to its players are removed; the players keep their accounts and can register a new team. If a deleted team is in the running league, the game asks a second time: the **whole league is reset** (all announced matches and league results erased, league can be started again). Logged as `team.delete`.
 
