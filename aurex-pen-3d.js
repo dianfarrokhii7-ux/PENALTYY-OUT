@@ -344,8 +344,22 @@ Gfx.react = (kind, shooter, keeper) => { S.celebrate = { kind, shooter, keeper, 
 Gfx.refSignal = (what, color) => { S.refState = what; S.refT0 = S.now(); if (ref) { ref.userData.card.visible = what === 'card'; ref.userData.card.material.color.setHex(color || 0xffd23f); } };
 Gfx.crowdCheer = (on) => { S.cheer = on ? S.now() + 2500 : 0; };
 Gfx.shake = a => { shake = Math.max(shake, a); };
-Gfx.startIntro = (t0, durMs) => { S.intro = { t0, dur: durMs }; S.mode = 'intro'; };
-Gfx.stopIntro = () => { S.intro = null; };
+/** preMs > 0 = opening ceremony: before the normal walk-out the camera circles the empty stadium around a spinning golden trophy. */
+Gfx.startIntro = (t0, durMs, preMs) => { S.intro = { t0, dur: durMs, pre: (preMs || 0) / 1000 }; S.mode = 'intro'; if (preMs > 0) trophyShow(true); };
+Gfx.stopIntro = () => { S.intro = null; trophyShow(false); if (ref) ref.visible = true; if (ballMesh) ballMesh.visible = true; if (ballShadow) ballShadow.visible = true; };
+Gfx.skipPre = () => { const it = S.intro; if (!it || !it.pre) return; const rem = it.t0 + it.pre * 1000 - S.now(); if (rem > 0) it.t0 -= rem; };
+let trophy = null;
+function makeTrophy() {
+  const g = new THREE.Group(), gold = new THREE.MeshStandardMaterial({ color: 0xf5c84a, metalness: 0.85, roughness: 0.28, emissive: 0x7a5a08, emissiveIntensity: 0.65 }), dark = new THREE.MeshStandardMaterial({ color: 0x0e1d4a, metalness: 0.3, roughness: 0.5, emissive: 0x061030, emissiveIntensity: 0.6 });
+  const dais = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.8, 0.45, 40), dark); dais.position.y = 0.225; g.add(dais);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.62, 0.05, 8, 48), gold); ring.rotation.x = Math.PI / 2; ring.position.y = 0.46; g.add(ring);
+  const prof = [[0.01, 0], [0.62, 0], [0.62, 0.16], [0.34, 0.28], [0.13, 0.5], [0.13, 1.0], [0.32, 1.22], [0.66, 1.44], [0.88, 1.95], [0.9, 2.4], [0.78, 2.56], [0.7, 2.5], [0.74, 2.36], [0.72, 1.98], [0.01, 1.6]].map(p => new THREE.Vector2(p[0], p[1]));
+  const cup = new THREE.Mesh(new THREE.LatheGeometry(prof, 36), gold); cup.position.y = 0.45; g.add(cup);
+  for (const sx of [-1, 1]) { const h = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.065, 10, 24, Math.PI * 1.3), gold); h.position.set(sx * 0.95, 2.1, 0); h.rotation.z = sx > 0 ? -Math.PI * 0.65 : -Math.PI * 0.05 + Math.PI * 0.0; g.add(h); }
+  const star = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), gold); star.position.y = 3.15; g.add(star);
+  g.scale.setScalar(1.25); g.position.set(0, 0, 6.2); return g;
+}
+function trophyShow(on) { if (on && !trophy) { try { trophy = makeTrophy(); scene.add(trophy); } catch (_) { trophy = null; } } if (trophy) trophy.visible = !!on; }
 Gfx.startReplay = (samples, speed, camMode) => { if (!samples || samples.length < 3) return; S.replay = { s: samples, t0: S.now(), speed: speed || 0.35, cam: camMode || 'goalcam', until: S.now() + (samples[samples.length - 1][0] / (speed || 0.35)) * 1000 + 500 }; };
 Gfx.stopReplay = () => { S.replay = null; };
 Gfx.isReplaying = () => !!S.replay;
@@ -414,7 +428,15 @@ function placeActors(tNow, nowT) {
 }
 function introUpdate(nowT) {
   const it = S.intro; if (!it || !actors.length) return false;
-  const t = (nowT - it.t0) / 1000, count = [0, 0];
+  const tr = (nowT - it.t0) / 1000, t = tr - it.pre, count = [0, 0];
+  if (t < 0) {                                                     // opening ceremony: empty stadium, camera orbits the trophy
+    actors.forEach(a => { a.visible = false; }); ref.visible = false; ballMesh.visible = false; ballShadow.visible = false;
+    const k = clamp(tr / Math.max(1, it.pre), 0, 1), ang = lerp(-0.95, 0.85, ease(k)), rad = lerp(21, 12.5, k);
+    if (trophy) { trophy.visible = true; trophy.rotation.y = tr * 0.9; }
+    camPos.set(Math.sin(ang) * rad, lerp(8.5, 3.4, ease(k)), 6.2 + Math.cos(ang) * rad); camLook.set(0, lerp(2.2, 2.6, k), 6.2);
+    cam.fov = lerp(58, 46, k) * (Gfx.baseFov ? Gfx.baseFov / 52 : 1); cam.updateProjectionMatrix(); cam.position.copy(camPos); cam.lookAt(camLook); return true;
+  }
+  ref.visible = true; ballMesh.visible = true; ballShadow.visible = true; if (trophy) trophy.visible = false;
   const place = (obj, from, to, t0, t1, face) => {
     const k = clamp((t - t0) / (t1 - t0), 0, 1), x = lerp(from[0], to[0], ease(k)), z = lerp(from[1], to[1], ease(k));
     obj.position.set(x, 0, z);

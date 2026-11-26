@@ -35,6 +35,9 @@ const Snd = (() => {
     save() { tone(110, 0.15, 'sine', 0.5, 70); noise(0.1, 0.3, 200, 2500); },
     bounce() { tone(190, 0.07, 'sine', 0.25, 120); },
     beep() { tone(1500, 0.08, 'square', 0.1); },
+    fanfare() { [392, 523, 659, 784].forEach((f, i) => later(i * 190, () => { tone(f, 0.6, 'sawtooth', 0.1); tone(f * 2, 0.5, 'triangle', 0.06); })); later(820, () => { [523, 659, 784, 1047].forEach(f => tone(f, 1.5, 'sawtooth', 0.085)); tone(262, 1.6, 'triangle', 0.12); }); },
+    boom() { tone(95, 0.55, 'sine', 0.32, 34); noise(0.45, 0.16, 120, 1800); },
+    whoosh() { noise(0.7, 0.11, 300, 5200); },
     varIn() { tone(660, 0.15, 'square', 0.12); later(160, () => tone(880, 0.15, 'square', 0.12)); later(320, () => tone(1320, 0.25, 'square', 0.12)); },
     card() { tone(300, 0.3, 'sawtooth', 0.1, 220); },
     roar(big) { const a = ctx(); if (!a) return; if (crowd) { try { crowd.stop(); } catch (e) { } } const d = big ? 3.2 : 1.6, n = a.sampleRate * d, b = a.createBuffer(1, n, a.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) { const e = Math.sin(Math.PI * i / n); x[i] = (Math.random() * 2 - 1) * e; } const s = a.createBufferSource(); s.buffer = b; const f = a.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.4; const g = a.createGain(); g.gain.value = big ? 0.55 : 0.3; s.connect(f); f.connect(g); g.connect(master); s.start(); crowd = s; },
@@ -158,7 +161,7 @@ function connect() {
   sock.on('lobby', d => { if (phase === 'menu') lobbyUI(d.room); });
   sock.on('room', d => { room = d.room; if (!started) return; const off2 = d.room.players.findIndex(p => p && !p.on); text('conn', off2 >= 0 ? (REP ? d.room.players[off2].team.name + ' lost the connection — waiting up to 60 s for them to return…' : off2 === me ? '' : 'Opponent disconnected — waiting up to 60 s for them to return…') : ''); });
   if (REP) { sock.on('spec:list', repList); sock.on('spec:start', repStart); sock.on('spec:error', d => text('repErr', d.message || d.code)); sock.on('spec:end', repGone); }
-  sock.on('match:start', onMatchStart);
+  sock.on('match:start', onMatchStart); sock.on('ceremony:reporters', d => { if (window.AurexCeremony) AurexCeremony.setReporters(d.reporters); });
   sock.on('sync', onSync);
   sock.on('turn', onTurn);
   sock.on('kp', d => Gfx.keeperTo(d.x, d.kz));
@@ -189,17 +192,34 @@ async function shareResult() {
     $('shareMsg').textContent = r === 'downloaded' ? 'Card saved as an image.' : r === 'shared' ? 'Shared!' : '';
   } catch (e) { $('shareMsg').textContent = 'Could not create the card.'; } finally { b.disabled = false; }
 }
+/** The normal walk-out intro (names, title, coin toss). With the opening ceremony it starts `delay` ms later, after the ceremony part. */
+function scheduleIntro(base, delay) {
+  const it = $('intro'), nIn = Math.min(2600, base * 0.28), tOut = base * 0.66;
+  later(delay + nIn, () => it.classList.add('names-in')); later(delay + tOut, () => { it.classList.add('names-out'); it.classList.add('title-in'); show('hud', false); Snd.roar(false); });
+  later(delay + base - 200, () => { $('fade').classList.add('on'); }); later(delay + base + 150, () => { show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); });
+}
+/** Opening ceremony (first league match): overlay scenes + trophy flyover. `elapsed` > 0 = a reporter who joined while it was already running. */
+function runCeremony(cer, pre, base, elapsed) {
+  if (!window.AurexCeremony || !AurexCeremony.play(cer, { players, preMs: pre, elapsedMs: elapsed, crest, snd: Snd })) return false;
+  show('hud', false); later(pre - elapsed, () => show('hud', true));
+  $('cerSkip').onclick = () => {                                  // SKIP: jump to the walk-out; the match clock on the server does not change
+    AurexCeremony.stop(); clearLater(); Gfx.skipPre(); show('hud', true); scheduleIntro(base, 0);
+    const it = $('intro'); it.className = ''; show('intro', true);
+  };
+  return true;
+}
 function onMatchStart(d) {
   started = true; league = d.league; stage = d.stage || (d.league ? 'league' : 'friendly'); players = d.players; phase = 'intro';
   st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: d.first }; $('menu').classList.add('off'); show('hud', true); show('pad', false); Snd.unlock(); Snd.ambience();
   buildActors();
   try { initGfx(); Gfx.setActors(actorList); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('leave'); return; }
+  const cer = d.ceremony && d.ceremony.opening ? d.ceremony : null, pre = cer ? (cer.preMs || 0) : 0, base = d.introMs - pre;
   Gfx.setClock(srv); renderBoard(); text('role', ''); text('hint', ''); show('runbar', false); show('power', false); show('curveui', false);
-  Gfx.startIntro(srv(), d.introMs); Gfx.crowdCheer(true); Snd.roar(true);
+  Gfx.startIntro(srv(), d.introMs, pre); Gfx.crowdCheer(true); Snd.roar(true);
   players.forEach((p, i) => { text('itn' + i, p.team.name); text('ipn' + i, names(p)); $('icr' + i).src = crest(p.team); });
   const it = $('intro'); it.className = ''; show('intro', true); const first = players[d.first];
-  text('coin', `COIN TOSS · ${first.team.name.toUpperCase()} KICKS FIRST`); const nIn = Math.min(2600, d.introMs * 0.28), tOut = d.introMs * 0.66;
-  later(nIn, () => it.classList.add('names-in')); later(tOut, () => { it.classList.add('names-out'); it.classList.add('title-in'); show('hud', false); Snd.roar(false); }); later(d.introMs - 200, () => { $('fade').classList.add('on'); }); later(d.introMs + 150, () => { show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); });
+  text('coin', `COIN TOSS · ${first.team.name.toUpperCase()} KICKS FIRST`);
+  scheduleIntro(base, pre); if (cer) runCeremony(cer, pre, base, 0);
 }
 function initGfx() {
   if (sbReady) return; sbReady = true;
@@ -228,6 +248,7 @@ function setPressure(p) {
   Snd.heart(!!(p && p.hot)); Snd.crowd(p ? (p.hot ? 0.1 : 0.22) : 0.35, 0.6);
 }
 function onTurn(d) {
+  if (window.AurexCeremony) AurexCeremony.stop();
   clearLater(); hideCard(); show('hud', true); show('intro', false); $('fade').classList.remove('on'); Gfx.stopIntro(); turn = d; phase = 'aim'; started = true; role = d.shooterUser === uid ? 'shooter' : d.keeperUser === uid ? 'keeper' : 'spectator'; sent = false; charging = false; power = 0; aim = { ax: 0, ay: 0.4, curve: 0 }; ballAll = []; runInfo = null; lastKin = '0,0';
   applyScore(d); show('var', false); show('callbox', false); $('banner').classList.remove('show'); show('runbar', false); setPressure(pressureFor(d));
   Gfx.clearTurn(); Gfx.setRole(role, actorOf(d.shooterUser), actorOf(d.keeperUser)); Gfx.keeperSnap(0, 0); Gfx.camera(role === 'keeper' ? 'keeper' : 'shooter', true);
@@ -391,6 +412,14 @@ function repStart(d) {
   text('repWatch', `· ${d.watchers} watching`); text('role', ''); text('hint', ''); text('conn', ''); Snd.unlock(); Snd.ambience(); buildActors();
   try { initGfx(); Gfx.setActors(actorList); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('spec:leave'); return; }
   Gfx.setClock(srv); Gfx.stopIntro(); Gfx.clearTurn(); Gfx.crowdCheer(false); repAngleSet(repAngle); renderBoard();
+  if (d.phase === 'intro' && d.ceremony && d.ceremony.opening && d.introMs != null) {          // joined during the opening ceremony: watch the rest of it
+    const cer = d.ceremony, pre = cer.preMs || 0, base = d.introMs - pre, elapsed = d.introMs - (d.introLeftMs || 0);
+    if (elapsed < pre) {
+      Gfx.startIntro(srv() - elapsed, d.introMs, pre); Gfx.crowdCheer(true); players.forEach((p, i) => { text('itn' + i, p.team.name); text('ipn' + i, names(p)); $('icr' + i).src = crest(p.team); });
+      text('coin', `COIN TOSS · ${players[d.first].team.name.toUpperCase()} KICKS FIRST`); const it = $('intro'); it.className = ''; show('intro', true);
+      scheduleIntro(base, pre - elapsed); runCeremony(cer, pre, base, elapsed); return;
+    }
+  }
   const t = d.turn, sc = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first, cards: d.cards };
   if (t && ['aim', 'runup', 'flight', 'reveal'].includes(d.phase)) {                       // joined in the middle of a kick: rebuild it from the same facts the players got
     onTurn({ ...t, ...sc });
@@ -404,6 +433,7 @@ function repStart(d) {
   }
 }
 function repBack() {
+  if (window.AurexCeremony) AurexCeremony.stop();
   sock.emit('spec:leave'); repCode = null; clearLater(); hideCard(); Gfx.stopReplay(); Gfx.setReporterCam('auto'); Snd.heart(false);
   started = false; turn = null; phase = 'menu'; role = 'none'; players = []; ballAll = [];
   show('hud', false); show('repbar', false); show('var', false); show('callbox', false); show('pad', false); show('sdTag', false); $('hud').classList.remove('sd', 'hot'); $('banner').classList.remove('show'); text('conn', '');

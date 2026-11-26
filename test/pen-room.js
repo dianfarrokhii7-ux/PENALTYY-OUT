@@ -37,7 +37,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   const store = mem.create(), env = { NODE_ENV: 'test', TRUST_PROXY: '0' }, api = createApi({ store, env }), core = api.core;
   const nsp = new FakeNsp(), io = { of: () => nsp };
-  const T = { aimMs: 900, introMs: 30, whistleMs: 20, resultMs: 40, varExtraMs: 20, retakeMs: 40, reconnectMs: 350, tickMs: 10, streamMs: 10, runupMs: 60, feintDelayMs: 40, cleanupMs: 50 };
+  const T = { aimMs: 900, introMs: 30, openingExtraMs: 40, whistleMs: 20, resultMs: 40, varExtraMs: 20, retakeMs: 40, reconnectMs: 350, tickMs: 10, streamMs: 10, runupMs: 60, feintDelayMs: 40, cleanupMs: 50 };
   let seed = 7; const rng = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
   attach(io, { store, api }, { timing: T, timeScale: 8, rng });
 
@@ -220,6 +220,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     xb.send('join', { code: fAB.roomCode }); await sleep(30); assert.strictEqual(xb.count('joined'), 1);
     xa.send('ready'); xb.send('ready');
     const ms = await xa.wait('match:start'); assert.strictEqual(ms.league, true); assert.strictEqual(ms.stage, 'league');
+    // the FIRST league match of the cup opens it with the ceremony: teams, table, the next match and a longer intro
+    { const c = ms.ceremony; assert(c && c.opening === true, 'the first league match carries the opening ceremony'); assert.strictEqual(ms.introMs, T.introMs + T.openingExtraMs); assert.strictEqual(c.matchNo, 1); assert.strictEqual(c.matchTotal, 6, '4 teams = 6 league matches');
+      assert.strictEqual(c.standings.length, 4); assert(c.standings.every(r => r.played === 0 && r.points === 0 && r.team && r.team.name), 'the table is shown at 0 before the first kick');
+      assert(c.next && [c.next.teamA.id, c.next.teamB.id].sort().join() === [tC.id, tD.id].sort().join(), 'the next announced match (C v D) is shown'); assert(Array.isArray(c.reporters)); }
     const yA = xa.log.find(l => l[0] === 'joined')[1].you, yB = xb.log.find(l => l[0] === 'joined')[1].you;
     bot(xa, yA); bot(xb, yB); keeperBot(xa, yA); keeperBot(xb, yB);
     const endF = await xa.wait('end', null, 90000); assert.strictEqual(endF.saved, true); assert.strictEqual(endF.stage, 'league');
@@ -231,7 +235,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const yc = (await conn(c1)).socket; yc.send('join', { code: fCD.roomCode }); await sleep(30); assert.strictEqual(yc.count('joined'), 1); yc.send('leave'); await sleep(30);
     assert.strictEqual((await store.getPenFixture(fCD.id)).matchId, null, 'leaving an empty lobby records nothing'); yc.disconnect(); xc.disconnect();
     const yc2 = (await conn(c1)).socket, yd = (await conn(d1)).socket; yc2.send('join', { code: fCD.roomCode }); yd.send('join', { code: fCD.roomCode }); await sleep(30); yc2.send('ready'); yd.send('ready');
-    await yc2.wait('match:start'); await yc2.wait('turn'); const youC = yc2.log.find(l => l[0] === 'joined')[1].you;
+    { const m2 = await yc2.wait('match:start'); assert.strictEqual(m2.ceremony, undefined, 'only the opening match gets the ceremony'); assert.strictEqual(m2.introMs, T.introMs); } await yc2.wait('turn'); const youC = yc2.log.find(l => l[0] === 'joined')[1].you;
     yd.disconnect(); await sleep(T.reconnectMs + 150); const endCD = await yc2.wait('end'); assert.strictEqual(endCD.reason, 'forfeit'); assert.strictEqual(endCD.winner, youC); assert.strictEqual(endCD.stage, 'league');
     { const fx = await store.getPenFixture(fCD.id); assert.strictEqual(fx.winnerTeam, tC.id); assert.strictEqual(fx.match.reason, 'forfeit'); const cup = await core.penCup(); assert.strictEqual(cup.progress.leaguePlayed, 2); }
     yc2.disconnect(); xd.disconnect(); await sleep(60);

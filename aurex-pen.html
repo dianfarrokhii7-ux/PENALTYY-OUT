@@ -54,6 +54,18 @@
   <div class="title" id="introTitle"><img src="aurex-logo.png" alt=""><h1>AUREX <span>ELITE</span></h1><p id="introSub">PENALTY SHOOTOUT</p><p id="coin"></p></div>
 </div>
 
+<div id="cer" class="hide">
+  <canvas id="cerFx"></canvas>
+  <div class="sc title" data-sc="title"><img src="aurex-logo.png" alt=""><h1>AUREX <span>PENALTY CUP</span></h1><p id="cerTitleYear"></p></div>
+  <div class="sc pair" data-sc="vs"><p id="cerMatchNo"></p><div class="vsrow"><div><img id="cerVsA" alt=""><b id="cerVsNA"></b></div><em>VS</em><div><img id="cerVsB" alt=""><b id="cerVsNB"></b></div></div><p class="sub" id="cerTeamsLbl"></p></div>
+  <div class="sc team l" data-sc="teamA" id="cerTeamA"><small class="tclub"></small><img class="crest" alt=""><b class="tname"></b><span class="tcode"></span><div class="tplayers"></div><span class="tstat"></span></div>
+  <div class="sc team r" data-sc="teamB" id="cerTeamB"><small class="tclub"></small><img class="crest" alt=""><b class="tname"></b><span class="tcode"></span><div class="tplayers"></div><span class="tstat"></span></div>
+  <div class="sc tbl" data-sc="table"><h2>LEAGUE TABLE <span>MATCHDAY 1</span></h2><ul id="cerTable"></ul></div>
+  <div class="sc nxt" data-sc="next" id="cerNext"><h2>NEXT MATCH</h2><div id="cerNextTeams"></div><p id="cerNextMsg"></p></div>
+  <div id="cerLT"><div id="cerCommentary"><span class="lbl">LIVE ON</span><b class="who">AUREX TV</b></div><div id="cerRef"><span class="lbl">REFEREE</span><b>AI REFEREE + VAR</b></div></div>
+  <button id="cerSkip" type="button">SKIP ▶</button>
+</div>
+
 <div id="menu">
   <section id="scrBoot" class="screen"><img class="logo" src="aurex-logo.png" alt=""><h1>AUREX <span>ELITE</span></h1><p class="sub" id="bootMsg">Connecting…</p><a class="btn alt" id="bootLink" href="/aurex#/" hidden>Open AUREX</a></section>
   <section id="scrHome" class="screen hide">
@@ -99,5 +111,6 @@
 <script src="aurex-pen-physics.js"></script>
 <script src="aurex-pen-3d.js"></script>
 <script src="aurex-share.js"></script>
+<script src="aurex-ceremony.js"></script>
 <script src="aurex-pen.js"></script>
 </body></html>

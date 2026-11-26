@@ -13,7 +13,7 @@ const P = require('./pen-physics');
 const { judge } = require('./pen-ai');
 const { C } = P;
 
-const DEFAULT_TIMING = { aimMs: 25000, introMs: 10000, whistleMs: 1600, resultMs: 3600, varExtraMs: 1200, retakeMs: 2600, reconnectMs: 60000, queueMs: 180000, tickMs: 40, streamMs: 50, lookMs: 250, cleanupMs: 90000 };
+const DEFAULT_TIMING = { aimMs: 25000, introMs: 10000, openingExtraMs: 18000, whistleMs: 1600, resultMs: 3600, varExtraMs: 1200, retakeMs: 2600, reconnectMs: 60000, queueMs: 180000, tickMs: 40, streamMs: 50, lookMs: 250, cleanupMs: 90000 };
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -105,6 +105,31 @@ const MAX_MEMBERS = 2;
     other.emit('joined', { you: 0, uid: other.data.user.id, code: r.code, room: roomView(r), ts: now() }); sock.emit('joined', { you: 1, uid: sock.data.user.id, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
   }
 
+
+  /* ---------------------------------------------------------------- opening ceremony (first league match of the cup) */
+  const liveTeam = t => ({ id: t.id, name: t.name, hasLogo: !!t.hasLogo });
+  /** The names of the reporters (گزارشگر) who are watching this room right now, in the order they joined (max 3, no duplicates). */
+  function reporterNames(r) {
+    const out = []; for (const s of r.specs) { const n = s.data && s.data.user && s.data.user.username; if (n && !out.includes(n)) out.push(n); if (out.length >= 3) break; }
+    return out;
+  }
+  /** Only the FIRST announced league fixture, and only while no league match has been played yet, gets the ceremony: the room is the one that opens the cup. */
+  async function openingCeremony(r) {
+    if (!r.fixture || r.fixture.stage !== 'league') return null;
+    let cup; try { cup = await core.penCup(null); } catch (_) { return null; }
+    if (!cup || !cup.league.started || cup.progress.leaguePlayed > 0) return null;
+    const lf = cup.fixtures.filter(f => f.stage === 'league');
+    if (!lf.length || lf[0].id !== r.fixture.id) return null;
+    const nx = lf.find(f => f.id !== r.fixture.id && !f.played);
+    return {
+      opening: true, cup: 'AUREX PENALTY CUP', year: new Date(now()).getFullYear(), matchNo: 1, matchTotal: cup.progress.leagueTotal, teamCount: cup.league.teamCount,
+      standings: cup.standings.map(x => ({ rank: x.rank, team: liveTeam({ id: x.teamId, name: x.name, hasLogo: x.hasLogo }), played: x.played, points: x.points, gd: x.gd })),
+      next: nx ? { teamA: liveTeam(nx.teamA), teamB: liveTeam(nx.teamB), scheduledAt: nx.scheduledAt || null } : null,
+      serverNow: now(),
+    };
+  }
+  /** Tell everybody in the room who the reporters are (only while the ceremony is on screen). */
+  function ceremonyReporters(r) { if (r.ceremony && r.phase === 'intro') emit(r, 'ceremony:reporters', { reporters: reporterNames(r) }); }
   /* ---------------------------------------------------------------- match flow */
   async function startMatch(r) {
     if (r.phase !== 'lobby' || !r.players[0] || !r.players[1]) return;
@@ -113,11 +138,14 @@ const MAX_MEMBERS = 2;
       let f = null; try { f = await store.getPenFixture(r.fixture.id); } catch (_) { f = null; }
       if (!f || f.matchId) { r.phase = 'lobby'; r.players.forEach(sd => { if (sd) sd.members.forEach(m => { m.ready = false; }); }); emit(r, 'err', { code: 'MATCH_PLAYED', message: 'This league match has already been decided.' }); lobbyUpdate(r); return; }
     }
+    const cer = await openingCeremony(r).catch(() => null);      // only the very first league match of the cup
     if (r.phase !== 'starting') return;
     r.league = r.stage === 'league';                             // only the round robin counts in the table; friendlies never do
     const first = rng() < 0.5 ? 0 : 1; r.sh = Rules.newShootout(first); r.phase = 'intro'; r.k = 0;
-    emit(r, 'match:start', { matchId: r.id, league: r.stage !== 'friendly', stage: r.stage, first, players: r.players.map(pub), introMs: T.introMs, room: roomView(r) });
-    r.t.intro = setTimeout(() => nextKick(r), T.introMs);
+    const introMs = T.introMs + (cer ? T.openingExtraMs : 0); r.ceremony = cer ? { ...cer, introMs, preMs: T.openingExtraMs } : null; r.introAt = now(); r.introMs = introMs;
+    if (r.ceremony) r.ceremony.reporters = reporterNames(r);
+    emit(r, 'match:start', { matchId: r.id, league: r.stage !== 'friendly', stage: r.stage, first, players: r.players.map(pub), introMs, room: roomView(r), ...(r.ceremony ? { ceremony: r.ceremony } : {}) });
+    r.t.intro = setTimeout(() => nextKick(r), introMs);
   }
 
   /** 2-player teams: the members of a team take turns. Kick n of a side is taken by member (n mod size); the keeper of the other side rotates the same way.
@@ -287,6 +315,7 @@ const MAX_MEMBERS = 2;
   function specSnapshot(r) {
     const t = r.turn, nm = id => (memberOf(r, id) || {}).username;
     const out = { code: r.code, matchId: r.id, phase: r.phase, league: r.stage !== 'friendly', stage: r.stage, players: r.players.map(pub), ...scoreView(r), cards: r.players.map(p => p.yellow), watchers: r.specs.size, ts: now() };
+    if (r.phase === 'intro' && r.ceremony) { out.ceremony = { ...r.ceremony, reporters: reporterNames(r) }; out.introMs = r.introMs; out.introLeftMs = Math.max(0, r.introAt + r.introMs - now()); }
     if (t && r.phase !== 'intro') {
       out.turn = { k: t.k, shooter: t.side, keeper: t.keeper, shooterUser: t.shooterUser, keeperUser: t.keeperUser, shooterName: nm(t.shooterUser), keeperName: nm(t.keeperUser), retake: t.retakes, whistleAt: t.whistleAt, deadline: t.deadline, strikeAt: t.strikeAt, runAt: t.runAt, runMs: RUN, keeperPos: r.players[t.keeper].kp, dive: t.dive, feint: t.feint };
       if (t.launch && t.sim && t.kpAtStrike) { out.kick = { k: t.k, strikeAt: t.strikeAt, curve: t.launch.curve, speed: +t.launch.speed.toFixed(1), keeper: t.kpAtStrike, lookMs: T.lookMs }; out.ball = t.sim.samples.slice(0, t.sentIdx); }
@@ -296,7 +325,7 @@ const MAX_MEMBERS = 2;
   function specStop(sock) {
     const code = sock.data && sock.data.spec; if (!code) return;
     sock.data.spec = null; try { sock.leave(code); } catch (_) { }
-    const r = rooms.get(code); if (r) r.specs.delete(sock);
+    const r = rooms.get(code); if (r) { r.specs.delete(sock); ceremonyReporters(r); }
   }
   /** A reporter socket (client connects with ?mode=reporter): it never takes the player's seat, never replaces his game tab and has NO game handlers at all. */
   function reporterConnection(socket) {
@@ -312,7 +341,7 @@ const MAX_MEMBERS = 2;
       if (socket.data.spec === code) return;
       if (r.specs.size >= SPEC_MAX) return socket.emit('spec:error', { code: 'FULL', message: 'Too many reporters are watching this match.' });
       specStop(socket); socket.join(code); r.specs.add(socket); socket.data.spec = code;
-      socket.emit('spec:start', specSnapshot(r));
+      socket.emit('spec:start', specSnapshot(r)); ceremonyReporters(r);
     }));
     socket.on('spec:leave', wrap(() => specStop(socket)));
     socket.on('disconnect', wrap(() => specStop(socket)));

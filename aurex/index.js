@@ -23,6 +23,7 @@ function mount(app, env = process.env) {
   asset('/aurex-pen.js', 'aurex-pen.js', 'application/javascript'); asset('/aurex-pen.css', 'aurex-pen.css', 'text/css');
   asset('/aurex-scoreboard.webp', 'aurex-scoreboard.webp', 'image/webp');
   asset('/aurex-share.js', 'aurex-share.js', 'application/javascript');
+  asset('/aurex-ceremony.js', 'aurex-ceremony.js', 'application/javascript');
   asset('/aurex-pen-3d.js', 'aurex-pen-3d.js', 'application/javascript');
   asset('/aurex-pen-physics.js', 'aurex/pen-physics.js', 'application/javascript');
 
