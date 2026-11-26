@@ -18,9 +18,9 @@
     DT: 1 / 240, SAMPLE_EVERY: 4, MAX_T: 5.0,
     KD: 0.0133,            // quadratic drag coefficient  (0.5·Cd·ρ·A / m)
     CURVE_A: 6.0,          // lateral acceleration at curve = ±1 and 25 m/s (m/s²)
-    V_MIN: 14, V_RANGE: 12, // shot speed 14 … 26 m/s
+    V_MIN: 13, V_RANGE: 10.5, // shot speed 13 … 23.5 m/s
     ENCROACH_LIMIT: 0.25,  // keeper may have a foot on / level with the line: anything further forward is encroachment (m)
-    KEEPER_REACT: 0.08,    // push-off delay after the dive command (s)
+    KEEPER_REACT: 0.04,    // push-off delay after the dive command (s)
     KEEPER_MAX_X: 3.0, KEEPER_MAX_Z: 1.2,
     RUNUP_MS: 720, FEINT_DELAY_MS: 380,
     FEINT_LEGAL_BELOW: 0.60, FEINT_GREY_BELOW: 0.72, FEINT_VAR_SPLIT: 0.66,
@@ -30,9 +30,10 @@
 
   /* ------------------------------------------------------------------ goalkeeper */
   const DIVES = {
-    low:  { T: 0.42, D: 1.85, phi: 74 * Math.PI / 180, y0: 0.95, y1: 0.52, arc: 0.22 },
-    high: { T: 0.50, D: 1.45, phi: 55 * Math.PI / 180, y0: 0.95, y1: 1.45, arc: 0.20 },
-    jump: { T: 0.46, D: 0,    phi: 0,                  y0: 0.95, y1: 1.30, arc: 0.12 },
+    // T = time of the dive (s), D = sideways distance of the body centre (m), phi = final body tilt from vertical, y0/y1 = centre height start/end (m)
+    low:  { T: 0.30, D: 2.10, phi: 84 * Math.PI / 180, y0: 0.95, y1: 0.65, arc: 0.20 },
+    high: { T: 0.34, D: 1.70, phi: 58 * Math.PI / 180, y0: 0.95, y1: 1.55, arc: 0.20 },
+    jump: { T: 0.32, D: 0,    phi: 0,                  y0: 0.95, y1: 1.40, arc: 0.12 },
   };
   function diveKind(dive) {
     if (!dive || (!dive.dir && !dive.hi)) return null;
@@ -50,7 +51,7 @@
     pose.cx = k.x + dir * d.D * e;
     pose.cy = d.y0 + (d.y1 - d.y0) * e + d.arc * Math.sin(Math.PI * s);
     pose.ux = dir * Math.sin(phi); pose.uy = Math.cos(phi);
-    pose.spread = kind === 'jump' ? 1 - 0.65 * e : 1 - e; pose.ext = e; pose.s = s;
+    pose.spread = kind === 'jump' ? 1 - 0.25 * e : 1 - e; pose.ext = e; pose.s = s;
     return pose;
   }
   /** Capsules (segment + radius) that make the keeper's body at a pose. kind: 'body' | 'arms' | 'hands'. */
@@ -58,10 +59,10 @@
     const z = p.cz, ux = p.ux, uy = p.uy, px = uy, py = -ux;            // u = body axis, perp = arm axis (both in the x/y plane)
     const hl = 0.95, sh = 0.55;
     const out = [
-      { kind: 'body', a: [p.cx - ux * hl, p.cy - uy * hl, z], b: [p.cx + ux * hl, p.cy + uy * hl, z], r: 0.28 },
-      { kind: 'arms', a: [p.cx + ux * sh - px * 0.85 * p.spread, p.cy + uy * sh - py * 0.85 * p.spread, z], b: [p.cx + ux * sh + px * 0.85 * p.spread, p.cy + uy * sh + py * 0.85 * p.spread, z], r: 0.11 },
+      { kind: 'body', a: [p.cx - ux * hl, p.cy - uy * hl, z], b: [p.cx + ux * hl, p.cy + uy * hl, z], r: 0.34 },
+      { kind: 'arms', a: [p.cx + ux * sh - px * 0.85 * p.spread, p.cy + uy * sh - py * 0.85 * p.spread, z], b: [p.cx + ux * sh + px * 0.85 * p.spread, p.cy + uy * sh + py * 0.85 * p.spread, z], r: 0.20 },
     ];
-    if (p.ext > 0.05) { const h = hl + 0.45 * p.ext; out.push({ kind: 'hands', a: [p.cx + ux * hl, p.cy + uy * hl, z], b: [p.cx + ux * h, p.cy + uy * h, z], r: 0.15 }); }
+    if (p.ext > 0.05) { const h = hl + 0.55 * p.ext; out.push({ kind: 'hands', a: [p.cx + ux * hl, p.cy + uy * hl, z], b: [p.cx + ux * h, p.cy + uy * h, z], r: 0.30 }); }
     return out;
   }
   function closestOnSeg(a, b, p) {
@@ -183,7 +184,7 @@
               const sp = hyp(rv[0], rv[1], rv[2]), handsy = best.c.kind !== 'body';
               p[0] = best.q[0] + nx * (C.BR + best.c.r + 0.002); p[1] = best.q[1] + ny * (C.BR + best.c.r + 0.002); p[2] = best.q[2] + nz * (C.BR + best.c.r + 0.002);
               if (!keeperTouch) keeperTouch = { t: +t.toFixed(3), x: +p[0].toFixed(2), y: +p[1].toFixed(2), z: +p[2].toFixed(2), part: best.c.kind };
-              if (handsy && sp <= 13 && p[2] > -C.BR) { held = true; events.push({ t: +t.toFixed(3), type: 'catch', x: +p[0].toFixed(2), y: +p[1].toFixed(2) }); tEnd = Math.min(tEnd, t + 0.5); }
+              if (handsy && sp <= 16 && p[2] > -C.BR) { held = true; events.push({ t: +t.toFixed(3), type: 'catch', x: +p[0].toFixed(2), y: +p[1].toFixed(2) }); tEnd = Math.min(tEnd, t + 0.5); }
               else {
                 // glove / body contact: normal bounce with low restitution and strong tangential grip (the keeper is a heavy, soft body)
                 const e = handsy ? 0.45 : 0.28, fr = handsy ? 0.30 : 0.40;
