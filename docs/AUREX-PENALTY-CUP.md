@@ -44,3 +44,7 @@ Additive DB tables (created at boot, idempotent): `aurex_pen_league`, `aurex_pen
 
 ## Teams of 1 or 2 players
 A team may play with one member (he takes every kick and every keeper turn) or with both registered members. Only the team's registered members can join their team's side (they enter the same room code). Kicks rotate: a team's n-th kick is taken by member n mod 2, the opposing keeper rotates the same way, so each kick is one shooter vs one keeper; the other two watch. If a member drops, his teammate covers; a team only forfeits when every member has been gone for 60 s.
+
+## Team profile (`/aurex#/teams/<id>`)
+Every approved/active team has a public profile: logo, name, Team ID, status, captain, squad (captain first), selected football club, league position and points, penalty record (played/won/drawn/lost, goals for/against, goal difference, win rate, form), next announced match (no room code) and the last 10 results. Open it from **Teams**, from the cup table / match lists (team names are links) or from **My team → View team profile**.
+API: `GET /api/aurex/teams/:id/profile` (public). Pending, rejected and suspended teams are only visible to their own players and the owner. Code: `core.teamProfile` (`aurex/core.js`), `viewTeamProfile` (`aurex-ui.js`), test `test/team-profile.js`.

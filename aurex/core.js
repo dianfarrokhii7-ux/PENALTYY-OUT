@@ -247,6 +247,42 @@ function createCore({ store, env = process.env }) {
       progress: { leagueTotal: n ? Rules.leagueMatchCount(n) : 0, leagueAnnounced: lf.length, leaguePlayed: lf.filter(f => f.matchId).length },
       recent: recent.map(m => ({ id: m.id, teamA: m.teamAName, teamB: m.teamBName, teamAId: m.teamA, teamBId: m.teamB, playerA: m.playerAName, playerB: m.playerBName, goalsA: m.goalsA, goalsB: m.goalsB, result: m.result, reason: m.reason, league: !!m.league, stage: m.stage || (m.league ? 'league' : 'friendly'), varCount: m.varCount || 0, finishedAt: m.finishedAt })) };
   }
+
+  /** Public team profile: identity, captain, squad, football club, league position, overall penalty record, form, next match and recent results. */
+  async function teamProfile(viewer, id) {
+    const t = await store.getTeamById(id);
+    const seen = t && (LIVE.has(t.status) || (viewer && (viewer.role === 'OWNER' || t.members.some(m => m.userId === viewer.id))));
+    if (!t || !seen) throw err(404, 'TEAM_NOT_FOUND', 'Team not found.');
+    const [league, teams, lm, all, fixtures, club] = await Promise.all([store.getPenLeague(), store.listTeams(), store.allLeaguePenMatches(), store.listPenMatches({ limit: 1000 }),
+      store.listPenFixtures(), typeof store.getClubSelection === 'function' ? store.getClubSelection(t.id).catch(() => null) : null]);
+    const byId = new Map(teams.map(x => [x.id, x]));
+    const entered = league.started && league.teams ? league.teams.map(x => byId.get(x)).filter(Boolean) : null;
+    const shown = entered || teams.filter(x => CUP_TEAM_OK.includes(x.status));
+    const standings = Rules.computeStandings(shown.map(teamLite), lm), row = standings.find(r => r.teamId === t.id) || null;
+    const mine = all.filter(m => m.teamA === t.id || m.teamB === t.id);                     // newest first
+    const side = m => (m.teamA === t.id ? { gf: m.goalsA, ga: m.goalsB, opp: m.teamB, oppName: m.teamBName, me: m.playerAName, them: m.playerBName, won: m.result === 'A' } : { gf: m.goalsB, ga: m.goalsA, opp: m.teamA, oppName: m.teamAName, me: m.playerBName, them: m.playerAName, won: m.result === 'B' });
+    const overall = { played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, friendlies: 0 };
+    const recent = mine.map(m => {
+      const s = side(m), res = m.result === 'A' || m.result === 'B' ? (s.won ? 'W' : 'L') : 'D';
+      overall.played++; overall.gf += s.gf; overall.ga += s.ga; if (res === 'W') overall.won++; else if (res === 'L') overall.lost++; else overall.drawn++;
+      const stage = m.stage || (m.league ? 'league' : 'friendly'); if (stage === 'friendly') overall.friendlies++;
+      return { id: m.id, stage, result: res, gf: s.gf, ga: s.ga, opponent: { id: s.opp, name: s.oppName, hasLogo: !!(byId.get(s.opp) && byId.get(s.opp).hasLogo) }, reason: m.reason, finishedAt: m.finishedAt };
+    });
+    overall.gd = overall.gf - overall.ga; overall.winRate = overall.played ? Math.round(overall.won * 100 / overall.played) : null;
+    const nowMs = Date.now(), open = fixtures.filter(f => !f.matchId && (f.teamA === t.id || f.teamB === t.id))
+      .sort((x, y) => (x.scheduledAt ? +new Date(x.scheduledAt) : Infinity) - (y.scheduledAt ? +new Date(y.scheduledAt) : Infinity) || x.id - y.id)[0];
+    const next = open ? { stage: open.stage, scheduledAt: open.scheduledAt, open: open.scheduledAt ? nowMs >= +new Date(open.scheduledAt) : false, opponent: teamLite(byId.get(open.teamA === t.id ? open.teamB : open.teamA)) } : null;
+    const cap = t.members.find(m => m.userId === t.captainId);
+    return {
+      team: { id: t.id, name: t.name, teamCode: t.teamCode || null, status: t.status, hasLogo: !!t.hasLogo, createdAt: t.createdAt, isChampion: league.champion === t.id },
+      captain: cap ? { userId: cap.userId, username: cap.username } : null,
+      members: t.members.map(m => ({ userId: m.userId, username: m.username, role: m.userId === t.captainId ? 'Captain' : 'Player' })),
+      club: club ? { id: club.id, name: club.name, short: club.short } : null,
+      league: { started: !!league.started, phase: league.phase, inLeague: !!(entered && entered.some(x => x.id === t.id)), teamCount: entered ? entered.length : 0, row: row && league.started ? row : null },
+      overall, form: recent.slice(0, 5).map(r => r.result).reverse(), next, recent: recent.slice(0, 10),
+      isMine: !!viewer && t.members.some(m => m.userId === viewer.id),
+    };
+  }
   // ---------- owner panel ----------
   async function mustTeam(id) { const t = await store.getTeamById(id); if (!t) throw err(404, 'TEAM_NOT_FOUND', 'Team not found.'); return t; }
   const bad = (t, what) => err(409, 'BAD_STATE', `Cannot ${what}: team is ${t.status}.`);
@@ -407,6 +443,6 @@ function createCore({ store, env = process.env }) {
     async listAudit(actor) { assertOwner(actor); return store.listAudit(150); },
   };
 
-  return { authenticate, register, login, logout, me, changePassword, recover, bootstrapOwner, registerTeam, publicTeams, teamLogo, setCaptainByTeam, footballClubs, selectFootballClub, myFootballClub, penCup, penAdvance, admin, limiter, purge: () => store.purgeExpiredSessions() };
+  return { authenticate, register, login, logout, me, changePassword, recover, bootstrapOwner, registerTeam, publicTeams, teamLogo, setCaptainByTeam, footballClubs, selectFootballClub, myFootballClub, penCup, teamProfile, penAdvance, admin, limiter, purge: () => store.purgeExpiredSessions() };
 }
 module.exports = { createCore, publicUser, teamView };

@@ -176,7 +176,7 @@ function viewTeam() {
     suspended: ['bad', 'Team suspended', t.suspendReason || 'Contact the tournament owner.'] }[t.status];
   shell('team',
     h('section', { class: 'panel teamhead' }, crest(t), h('div', null, h('h1', { class: 'title-xl' }, t.name),
-      h('div', { class: 'row mt8' }, t.teamCode ? h('span', { class: 'chip code' }, t.teamCode) : h('span', { class: 'chip' }, 'Team ID pending'), chip(t.status)))),
+      h('div', { class: 'row mt8' }, t.teamCode ? h('span', { class: 'chip code' }, t.teamCode) : h('span', { class: 'chip' }, 'Team ID pending'), chip(t.status), ['approved', 'active'].includes(t.status) ? h('a', { class: 'btn sm', href: '#/teams/' + t.id }, 'View team profile') : null))),
     note ? h('div', { class: 'banner ' + note[0] }, h('b', null, note[1] + '. '), note[2]) : null,
     h('div', { class: 'grid2' }, squad(t),
       h('section', { class: 'panel' }, h('h3', null, 'Coming with match phase'), h('p', { class: 'muted small mt6' }, 'These need the match engine and league tables, which are built next. They are not available yet.'),
@@ -220,8 +220,70 @@ async function viewTeams() {
   shell('teams', h('h2', null, 'Teams in the championship'), h('p', { class: 'muted' }, 'Loading…'));
   try {
     const { teams } = await api('GET', '/teams/public');
-    shell('teams', h('h2', null, 'Teams in the championship'), teams.length ? h('div', { class: 'cards' }, teams.map(t => h('div', { class: 'tcard' }, crest(t, true), h('div', null, h('b', null, t.name), h('span', { class: 'muted small' }, `${t.teamCode} · ${t.members.map(m => m.username).join(' & ')}`))))) : h('p', { class: 'muted' }, 'No approved teams yet. Register yours from the My team page.'));
+    shell('teams', h('h2', null, 'Teams in the championship'), teams.length ? h('div', { class: 'cards' }, teams.map(t => h('a', { class: 'tcard tlink', href: '#/teams/' + t.id, 'aria-label': 'Open the profile of ' + t.name }, crest(t, true), h('div', null, h('b', null, t.name), h('span', { class: 'muted small' }, `${t.teamCode} · ${t.members.map(m => m.username).join(' & ')}`))))) : h('p', { class: 'muted' }, 'No approved teams yet. Register yours from the My team page.'));
   } catch (e) { toast(e.message, true); }
+}
+// ---------- team profile (public): logo, name, captain, squad, club, record, form, next match, results ----------
+const ordinal = n => { const v = n % 100; return n + (['th', 'st', 'nd', 'rd'][(v - 20) % 10] || ['th', 'st', 'nd', 'rd'][v] || 'th'); };
+const teamLink = (t, ...kids) => h('a', { class: 'tlink inline', href: '#/teams/' + t.id }, kids.length ? kids : t.name);
+const statTile = (label, value, cls) => h('div', { class: 'stat' + (cls ? ' ' + cls : '') }, h('b', null, value == null ? '–' : value), h('span', null, label));
+const STATUS_TEXT = { approved: 'Approved', active: 'Active', suspended: 'Suspended', pending: 'Pending', rejected: 'Rejected' };
+async function viewTeamProfile(id) {
+  shell('teams', h('p', { class: 'muted' }, 'Loading…'));
+  let d;
+  try { d = await api('GET', `/teams/${id}/profile`); }
+  catch (e) { return shell('teams', h('a', { class: 'back', href: '#/teams' }, '← All teams'), h('div', { class: 'banner bad' }, e.message)); }
+  if (location.hash.replace(/^#\/?/, '').split('/')[1] !== String(id)) return;      // the person already went somewhere else
+  const t = d.team, o = d.overall, L = d.league, row = L.row;
+  const clubId = d.club && /^[a-z0-9_-]{1,30}$/.test(d.club.id) ? d.club.id : null;
+  const hero = h('section', { class: 'panel profile-hero' + (t.isChampion ? ' champ' : '') },
+    crest({ id: t.id, name: t.name, hasLogo: t.hasLogo }),
+    h('div', { class: 'grow' },
+      h('div', { class: 'row' }, t.isChampion ? h('span', { class: 'chip gold' }, '🏆 Champions') : null, t.teamCode ? h('span', { class: 'chip code' }, t.teamCode) : null, h('span', { class: 'chip ' + t.status }, STATUS_TEXT[t.status] || t.status), row ? h('span', { class: 'chip approved' }, ordinal(row.rank) + ' of ' + L.teamCount) : null),
+      h('h1', { class: 'title-xl mt8' }, t.name),
+      h('div', { class: 'row mt8 muted' },
+        d.captain ? h('span', null, 'Captain: ', h('b', { class: 'cap' }, d.captain.username)) : null,
+        h('span', null, 'Squad: ', d.members.length, d.members.length === 1 ? ' player' : ' players'),
+        t.createdAt ? h('span', null, 'Registered ' + new Date(t.createdAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })) : null)),
+    clubId ? h('div', { class: 'profile-club' }, h('div', { class: 'club-crest sm club-' + clubId }, d.club.short), h('div', null, h('span', { class: 'muted small' }, 'Football club'), h('b', null, d.club.name))) : null);
+
+  const squadCard = m => h('li', { class: 'pl' + (m.role === 'Captain' ? ' cap' : '') },
+    h('span', { class: 'avatar', 'aria-hidden': 'true' }, m.username.slice(0, 1).toUpperCase()),
+    h('div', { class: 'grow' }, h('b', null, m.username, S.me && m.userId === S.me.id ? ' (you)' : ''), h('div', { class: 'muted small' }, m.role === 'Captain' ? 'Team captain' : 'Player')),
+    m.role === 'Captain' ? h('span', { class: 'chip gold' }, 'C') : null);
+  const squadPanel = h('section', { class: 'panel' }, h('h3', null, 'Squad'), h('ul', { class: 'squadlist' }, [...d.members].sort((a, b) => (b.role === 'Captain') - (a.role === 'Captain')).map(squadCard)));
+
+  const nextPanel = d.next ? h('section', { class: 'panel' }, h('h3', null, 'Next match'),
+    h('div', { class: 'row mt8' }, h('span', { class: 'chip ' + (d.next.stage === 'league' ? 'approved' : 'active') }, STAGE_NAME[d.next.stage] || 'Match'), d.next.open ? h('span', { class: 'chip active' }, 'Open now') : null),
+    h('div', { class: 'row mt8' }, d.next.opponent ? [h('span', { class: 'muted' }, 'vs'), teamLink(d.next.opponent, crest(d.next.opponent, true), h('b', null, d.next.opponent.name))] : null),
+    h('p', { class: 'muted mt8' }, fmtWhen(d.next.scheduledAt))) : null;
+
+  const recordPanel = h('section', { class: 'panel' }, h('h3', null, 'Penalty record'),
+    o.played ? [h('div', { class: 'statgrid mt14' }, statTile('Played', o.played), statTile('Won', o.won, 'w'), statTile('Drawn', o.drawn, 'd'), statTile('Lost', o.lost, 'l'),
+      statTile('Goals for', o.gf), statTile('Goals against', o.ga), statTile('Goal diff.', (o.gd > 0 ? '+' : '') + o.gd), statTile('Win rate', o.winRate + '%')),
+      h('div', { class: 'wl', role: 'img', 'aria-label': `${o.won} wins, ${o.drawn} draws, ${o.lost} losses` }, o.won ? h('i', { class: 'w', style: `flex:${o.won}` }) : null, o.drawn ? h('i', { class: 'd', style: `flex:${o.drawn}` }) : null, o.lost ? h('i', { class: 'l', style: `flex:${o.lost}` }) : null),
+      d.form.length ? h('div', { class: 'row mt14' }, h('span', { class: 'muted small' }, 'Form'), d.form.map(f => h('span', { class: 'chip ' + f }, f))) : null,
+      o.friendlies ? h('p', { class: 'muted small mt8' }, `Includes ${o.friendlies} friendly ${o.friendlies === 1 ? 'duel' : 'duels'}. Only announced league matches count for the table.`) : null]
+      : h('p', { class: 'muted mt8' }, 'No penalty duels played yet.'));
+
+  const leaguePanel = L.inLeague && row ? h('section', { class: 'panel' }, h('h3', null, 'League table'),
+    h('div', { class: 'statgrid mt14' }, statTile('Position', ordinal(row.rank), 'gold'), statTile('Points', row.points, 'gold'), statTile('Played', row.played), statTile('Won', row.won, 'w'), statTile('Drawn', row.drawn, 'd'), statTile('Lost', row.lost, 'l'), statTile('Goals for', row.gf), statTile('Goals against', row.ga))) : null;
+
+  const results = d.recent.length ? h('div', { class: 'panel scroll' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, ['When', 'Opponent', 'Score', '', 'Type', 'Note'].map(x => h('th', null, x)))),
+    h('tbody', null, d.recent.map(m => h('tr', null,
+      h('td', null, new Date(m.finishedAt).toLocaleDateString([], { day: 'numeric', month: 'short' })),
+      h('td', null, teamLink(m.opponent, crest(m.opponent, true), m.opponent.name)),
+      h('td', null, h('b', null, `${m.gf} – ${m.ga}`)), h('td', null, h('span', { class: 'chip ' + m.result }, m.result)),
+      h('td', null, h('span', { class: 'chip ' + (m.stage === 'friendly' ? 'D' : 'approved') }, STAGE_NAME[m.stage] || 'Friendly')),
+      h('td', { class: 'muted' }, RES_LABEL[m.reason] || '–'))))))
+    : h('p', { class: 'muted' }, 'No results yet.');
+
+  shell('teams', h('a', { class: 'back', href: '#/teams' }, '← All teams'), hero,
+    t.status === 'suspended' ? h('div', { class: 'banner bad' }, 'This team is currently suspended.') : null,
+    h('div', { class: 'grid2' }, squadPanel, nextPanel || leaguePanel || recordPanel),
+    nextPanel && leaguePanel ? leaguePanel : null, nextPanel || leaguePanel ? recordPanel : null,
+    h('h3', null, 'Recent results'), results,
+    d.isMine ? h('p', { class: 'muted small' }, h('a', { href: '#/team' }, 'Manage your team'), ' · ', h('a', { href: '#/clubs' }, 'Choose your football club')) : null);
 }
 function viewAccount() {
   const f = makeForm([
@@ -339,7 +401,7 @@ function cupTable(rows, started) {
     h('thead', null, h('tr', null, cols.map(c => h('th', null, c)))),
     h('tbody', null, rows.map(r => h('tr', null,
       h('td', null, started || r.played ? r.rank : '–'),
-      h('td', null, h('div', { class: 'row' }, crest({ id: r.teamId, name: r.name, hasLogo: r.hasLogo }, true), h('b', null, r.name))),
+      h('td', null, h('div', { class: 'row' }, crest({ id: r.teamId, name: r.name, hasLogo: r.hasLogo }, true), h('a', { class: 'tlink inline', href: '#/teams/' + r.teamId }, h('b', null, r.name)))),
       ...[r.played, r.won, r.drawn, r.lost, r.gf, r.ga, (r.gd > 0 ? '+' : '') + r.gd].map(v => h('td', null, v)),
       h('td', null, h('b', null, r.points)),
       h('td', null, (r.form || []).map(f => h('span', { class: 'chip ' + f }, f))))))));
@@ -354,7 +416,7 @@ function cupResults(list) {
       h('td', null, h('span', { class: 'chip ' + (m.stage === 'friendly' ? 'D' : 'W') }, STAGE_NAME[m.stage] || (m.league ? 'League' : 'Friendly'))),
       h('td', { class: 'muted' }, [RES_LABEL[m.reason] || '', m.varCount ? `VAR ×${m.varCount}` : ''].filter(Boolean).join(' · ') || '–'))))));
 }
-const fxTeam = (t, win) => h('span', { class: 'row' }, crest(t, true), win ? h('b', null, t.name) : t.name);
+const fxTeam = (t, win) => h('span', { class: 'row' }, crest(t, true), h('a', { class: 'tlink inline', href: '#/teams/' + t.id }, win ? h('b', null, t.name) : t.name));
 function fxStatus(f) {
   if (f.played) {
     const sc = f.score ? `${f.score.a} – ${f.score.b}` : '', why = f.score && RES_LABEL[f.score.reason] ? ` (${RES_LABEL[f.score.reason]})` : '';
@@ -553,7 +615,7 @@ function render() {
   if (r === 'recovery') return viewRecovery();
   if (!S.me) return viewAuth(r === 'register' ? 'register' : 'login');
   if (r === '' || r === 'team') return viewTeam();
-  if (r === 'teams') return viewTeams();
+  if (r === 'teams') return /^\d{1,9}$/.test(path[1] || '') ? viewTeamProfile(+path[1]) : viewTeams();
   if (r === 'clubs') return viewClubs();
   if (r === 'cup') return viewCup();
   if (r === 'account') return viewAccount();

@@ -45,6 +45,7 @@ function createApi({ store, env = process.env }) {
   R('POST', '/owner/bootstrap', { auth: true }, async c => ({ json: await core.bootstrapOwner(c.ip, c.user, c.body) }));
   // --- teams
   R('GET', '/teams/public', {}, async () => ({ json: { teams: await core.publicTeams() } }));
+  R('GET', `/teams/${ID}/profile`, { auth: 'optional' }, async c => ({ json: await core.teamProfile(c.user, +c.params.id) }));
   R('POST', '/teams', { auth: true, limit: 300 * 1024 }, async c => ({ status: 201, json: { team: await core.registerTeam(c.user, c.body) } }));
   R('POST', '/teams/mine/captain', { auth: true }, async c => ({ json: { team: await core.setCaptainByTeam(c.user, c.body) } }));
   R('GET', `/teams/${ID}/logo`, { auth: 'optional' }, async c => {
