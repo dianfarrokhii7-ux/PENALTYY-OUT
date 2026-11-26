@@ -5,7 +5,7 @@ const { createApi } = require('../aurex/api'); const mem = require('../aurex/sto
 const { attach } = require('../aurex/pen-room'); const Rules = require('../aurex/pen-rules');
 
 class FakeSocket {
-  constructor(nsp, headers) { this.nsp = nsp; this.id = 's' + Math.random().toString(36).slice(2); this.data = {}; this.handshake = { headers }; this.h = {}; this.log = []; this.waiters = []; this.rooms = new Set(); this.listeners = {}; this.closed = false; }
+  constructor(nsp, headers, query) { this.nsp = nsp; this.id = 's' + Math.random().toString(36).slice(2); this.data = {}; this.handshake = { headers, query: query || {} }; this.h = {}; this.log = []; this.waiters = []; this.rooms = new Set(); this.listeners = {}; this.closed = false; }
   on(ev, fn) { this.h[ev] = fn; }                                   // server side handlers
   join(r) { this.rooms.add(r); (this.nsp.rooms.get(r) || this.nsp.rooms.set(r, new Set()).get(r)).add(this); }
   leave(r) { this.rooms.delete(r); const s = this.nsp.rooms.get(r); if (s) s.delete(this); }
@@ -26,8 +26,8 @@ class FakeNsp {
   constructor() { this.mw = []; this.conn = null; this.rooms = new Map(); }
   use(fn) { this.mw.push(fn); } on(ev, fn) { if (ev === 'connection') this.conn = fn; }
   to(room) { return { emit: (ev, d) => { for (const s of [...(this.rooms.get(room) || [])]) s._recv(ev, d); } }; }
-  async connect(headers) {
-    const s = new FakeSocket(this, headers);
+  async connect(headers, query) {
+    const s = new FakeSocket(this, headers, query);
     for (const m of this.mw) { const err = await new Promise(res => m(s, e => res(e))); if (err) return { error: err.message }; }
     this.conn(s); return { socket: s };
   }
@@ -235,6 +235,38 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     yd.disconnect(); await sleep(T.reconnectMs + 150); const endCD = await yc2.wait('end'); assert.strictEqual(endCD.reason, 'forfeit'); assert.strictEqual(endCD.winner, youC); assert.strictEqual(endCD.stage, 'league');
     { const fx = await store.getPenFixture(fCD.id); assert.strictEqual(fx.winnerTeam, tC.id); assert.strictEqual(fx.match.reason, 'forfeit'); const cup = await core.penCup(); assert.strictEqual(cup.progress.leaguePlayed, 2); }
     yc2.disconnect(); xd.disconnect(); await sleep(60);
+  }
+
+  // ---- reporter: read-only spectators on their OWN socket (?mode=reporter) – watch any running match, never take part
+  {
+    const rep = async (u, extra) => { const r = await nsp.connect({ host: 'x.test', origin: 'http://x.test', cookie: 'aurex_sid=' + (u ? u.token : '') }, { mode: 'reporter', ...(extra || {}) }); return r.socket || r; };
+    assert.strictEqual((await rep(null)).error, 'AUTH_REQUIRED', 'reporters must be signed in too');
+    const pa = (await conn(a1)).socket, pb = (await conn(b1)).socket;
+    const sp0 = await rep(z); assert(sp0.log.some(l => l[0] === 'hello' && l[1].spectator), 'reporter gets a spectator hello');
+    for (const ev of ['create', 'join', 'quick', 'ready', 'shoot', 'dive', 'kin', 'feint', 'leave']) assert.strictEqual(sp0.h[ev], undefined, 'a reporter has no game handler: ' + ev);
+    sp0.send('spec:list'); assert.deepStrictEqual(sp0.log.find(l => l[0] === 'spec:list')[1].list, [], 'nothing is running yet');
+    sp0.send('spec:watch', { code: 'ZZZZZ' }); assert(sp0.log.some(l => l[0] === 'spec:error' && l[1].code === 'MATCH_NOT_LIVE'), 'unknown room');
+    pa.send('create'); const code = pa.log.find(l => l[0] === 'joined')[1].code; pb.send('join', { code });
+    await sleep(750); sp0.send('spec:list'); assert.strictEqual(sp0.log.filter(l => l[0] === 'spec:list').pop()[1].list.length, 0, 'a lobby is not a running match');
+    await sleep(320); sp0.send('spec:watch', { code }); assert.strictEqual(sp0.log.filter(l => l[0] === 'spec:error').length, 2, 'a lobby cannot be watched'); assert(!sp0.log.some(l => l[0] === 'spec:start'));
+    const ya = pa.log.find(l => l[0] === 'joined')[1].you, yb = pb.log.find(l => l[0] === 'joined')[1].you; bot(pa, ya); bot(pb, yb); keeperBot(pa, ya); keeperBot(pb, yb);
+    const spK = await rep(c2);                                              // a 2nd reporter joins exactly when the first kick is struck (phase "flight")
+    let kicked = false; pa.onc('kick', () => { if (!kicked) { kicked = true; spK.send('spec:watch', { code }); } });
+    pa.send('ready'); pb.send('ready'); await pa.wait('match:start'); await pa.wait('turn');
+    const spA = await rep(a1);                                              // even the player himself can open a reporter tab: it must NOT replace his game socket
+    assert(!pa.log.some(l => l[0] === 'err' && l[1].code === 'OPENED_ELSEWHERE'), 'a reporter tab never kicks the player out'); assert.strictEqual(spA.log.filter(l => l[0] === 'joined' || l[0] === 'sync').length, 0, 'a reporter is never seated or synced as a player');
+    await sleep(750); sp0.send('spec:list'); const L = sp0.log.filter(l => l[0] === 'spec:list').pop()[1].list;
+    assert.strictEqual(L.length, 1); assert.strictEqual(L[0].code, code); assert.strictEqual(L[0].stage, 'friendly'); assert.deepStrictEqual(L[0].sides.map(x => x.team.name).sort(), ['Alpha FC', 'Bravo FC']);
+    assert(L[0].sides.every(x => x.team.name && x.players.length), 'list carries team names and players'); assert(!JSON.stringify(L).includes('userId'), 'the public list leaks no user ids');
+    sp0.send('spec:watch', { code }); const snap = sp0.log.find(l => l[0] === 'spec:start')[1];
+    assert.strictEqual(snap.code, code); assert.strictEqual(snap.players.length, 2); assert(Array.isArray(snap.goals) && Array.isArray(snap.kicks) && Array.isArray(snap.log), 'snapshot carries the score'); assert(snap.watchers >= 1);
+    const snapK = spK.log.find(l => l[0] === 'spec:start')[1]; assert.strictEqual(snapK.phase, 'flight', 'joined while the ball was in the air'); assert(snapK.turn && snapK.kick && snapK.kick.k === snapK.turn.k && snapK.kick.strikeAt === snapK.turn.strikeAt, 'mid-kick snapshot rebuilds the kick'); assert(Array.isArray(snapK.ball));
+    const endS = await sp0.wait('end', null, 60000), endA = await pa.wait('end', null, 60000); assert.deepStrictEqual(endS.table, endA.table, 'reporters see exactly what the players see'); assert(sp0.count('turn') >= 1 && sp0.count('result') >= 1, 'live events reach the reporter');
+    await sleep(750); sp0.send('spec:list'); assert.strictEqual(sp0.log.filter(l => l[0] === 'spec:list').pop()[1].list.length, 0, 'a finished match leaves the live list');
+    await sleep(T.cleanupMs + 120); assert(sp0.log.some(l => l[0] === 'spec:end') && spK.log.some(l => l[0] === 'spec:end'), 'reporters are released when the room is destroyed');
+    sp0.send('spec:watch', { code }); assert(sp0.log.filter(l => l[0] === 'spec:error').length >= 3, 'a finished room cannot be watched');
+    assert.deepStrictEqual([...(nsp.rooms.get(code) || [])].filter(x => [sp0, spK, spA].includes(x)), [], 'no reporter stays in a destroyed room (a reused code can never leak events to him)');
+    [pa, pb, sp0, spK, spA].forEach(x => x.disconnect()); await sleep(40);
   }
   console.log('pen-room ok');
   process.exit(0);

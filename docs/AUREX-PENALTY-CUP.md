@@ -48,3 +48,13 @@ A team may play with one member (he takes every kick and every keeper turn) or w
 ## Team profile (`/aurex#/teams/<id>`)
 Every approved/active team has a public profile: logo, name, Team ID, status, captain, squad (captain first), selected football club, league position and points, penalty record (played/won/drawn/lost, goals for/against, goal difference, win rate, form), next announced match (no room code) and the last 10 results. Open it from **Teams**, from the cup table / match lists (team names are links) or from **My team → View team profile**.
 API: `GET /api/aurex/teams/:id/profile` (public). Pending, rejected and suspended teams are only visible to their own players and the owner. Code: `core.teamProfile` (`aurex/core.js`), `viewTeamProfile` (`aurex-ui.js`), test `test/team-profile.js`.
+
+## Reporter / گزارشگر (live spectating)
+Open **📺 Reporter** in the AUREX menu (or *Watch live matches* on the cup page) = `/aurex-pen?mode=reporter` (optionally `&code=ROOM` to jump straight into one match).
+- **Pick a match:** the page lists every running match (friendly, league, semi-final, final) with team names, players, score and viewer count; it refreshes every 4 s. Click one to watch it live.
+- **9 camera angles** (keys `1`–`9`, `C` / `→` next, `←` previous, or the buttons): Auto (the normal director), Broadcast, Kicker, Keeper, Net cam, Goal cam, Side, Top view, Ball cam. A chosen angle stays when the next kick starts and is also used for replays.
+- **Replays:** every goal is replayed automatically; `R` replays the last kick between kicks, `M` slow-motion on/off, `Esc` stops a replay, `S` mutes the sound. `EXIT` returns to the live list.
+- **Joining late is fine:** the server sends a snapshot (score, current kick, ball path so far) so you see the kick that is in the air.
+- **Security:** a reporter must be signed in to AUREX (a team is *not* needed). It connects with `?mode=reporter`, which gives it its own socket with **no game handlers at all** (it can never shoot, dive, ready up or take a seat), and it never replaces a player's own game tab. Max 300 reporters per match; list/watch requests are rate-limited. When a room is destroyed all its reporters are released, so a re-used room code can never leak events.
+- **Server events (namespace `/aurex-pen`, reporter sockets only):** `spec:list` → `{ list }`, `spec:watch {code}` → `spec:start` (snapshot) then the same `turn / runup / kick / ball / dive / var:start / result / end` events the players get, `spec:leave`, `spec:error`, `spec:end`.
+

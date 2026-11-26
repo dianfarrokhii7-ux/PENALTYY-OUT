@@ -66,6 +66,12 @@
     <p class="err" id="homeErr"></p>
     <a class="back" href="/aurex#/cup">← AUREX cup table</a>
   </section>
+  <section id="scrRep" class="screen wide hide">
+    <img class="logo sm" src="aurex-logo.png" alt=""><h1>REPORTER <span>گزارشگر</span></h1>
+    <p class="sub">Pick a running AUREX Penalty Cup match and watch it live from 9 camera angles, with instant replays. You only watch — you cannot influence the match.</p>
+    <div id="repList"></div><p class="err" id="repErr"></p>
+    <a class="back" href="/aurex#/cup">← AUREX cup table</a>
+  </section>
   <section id="scrQueue" class="screen hide"><h2>Looking for an opponent…</h2><div class="spin"></div><p class="sub">You are matched with a player from another AUREX team.</p><button class="btn alt" id="bCancel">Cancel</button></section>
   <section id="scrLobby" class="screen hide">
     <h2>Room <b id="roomCode" class="code"></b></h2><p class="sub" id="lobbyMsg">Share this code with the opponent.</p>
@@ -75,9 +81,15 @@
   </section>
   <section id="scrEnd" class="screen hide">
     <h2 id="endTitle"></h2><div class="bigscore" id="endScore"></div><p class="sub" id="endTeams"></p><p class="tagline" id="endMode"></p><p class="sub" id="endWhy"></p>
-    <div class="row"><a class="btn big" href="/aurex#/cup">Cup table</a><a class="btn alt" href="/aurex-pen">Play again</a></div>
+    <div class="row" id="endBtns"><a class="btn big" href="/aurex#/cup">Cup table</a><a class="btn alt" href="/aurex-pen">Play again</a></div>
+    <button class="btn big hide" id="bRepBack" type="button">📺 Back to live matches</button>
     <div class="row"><button class="btn alt" id="bShare" type="button">Share result card</button></div><p class="sub" id="shareMsg" role="status"></p>
   </section>
+</div>
+<div id="repbar" class="hide">
+  <div id="repTag">📺 LIVE · REPORTER <span id="repWatch"></span></div>
+  <div id="repAngles" role="group" aria-label="Camera angle"></div>
+  <div class="repbtns"><button id="rRep" type="button">⏪ REPLAY (R)</button><button id="rSlow" type="button">SLOW-MO: ON (M)</button><button id="rStop" type="button" class="hide">✕ STOP REPLAY (Esc)</button><button id="rMute" type="button" aria-label="Sound">🔊</button><button id="rExit" type="button">EXIT</button></div>
 </div>
 <div id="fade"></div>
 

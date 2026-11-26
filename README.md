@@ -77,3 +77,7 @@ After both players are connected **and** have confirmed their line-ups, the host
 
 ## AUREX CHAMPIONSHIP
 Accounts, team registration with owner approval and an owner panel, backed by PostgreSQL. See [docs/AUREX.md](docs/AUREX.md) for Render setup (`DATABASE_URL`, `AUREX_OWNER_KEY`) and the security model.
+
+### 📺 Reporter in AUREX CHAMPIONSHIP (گزارشگر)
+**Reporter** (menu link in AUREX and button on the Penalty cup page → `/aurex-pen?mode=reporter`) lists the AUREX Penalty Cup matches that are running right now. Pick one and watch it live from 9 camera angles (keys `1`–`9`, `C`, arrows), with automatic goal replays (`R` replay, `M` slow-mo, `Esc` stop, `S` mute). Read-only: a reporter can never influence the match. Details in [docs/AUREX-PENALTY-CUP.md](docs/AUREX-PENALTY-CUP.md).
+

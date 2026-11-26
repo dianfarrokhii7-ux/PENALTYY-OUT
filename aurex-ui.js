@@ -136,7 +136,7 @@ function shell(active, ...content) {
   app.replaceChildren(
     h('header', { class: 'top' },
       h('a', { class: 'brand', href: '#/team' }, h('img', { src: 'aurex-logo-sm.png', alt: '' }), 'AUREX'),
-      h('nav', { class: 'nav', 'aria-label': 'Main' }, link('#/team', 'My team', 'team'), link('#/teams', 'Teams', 'teams'), link('#/clubs', 'Football club', 'clubs'), link('#/cup', 'Penalty cup', 'cup'), S.me && S.me.role === 'OWNER' ? link('#/admin', 'Owner panel', 'admin') : null, link('#/account', 'Account', 'account')),
+      h('nav', { class: 'nav', 'aria-label': 'Main' }, link('#/team', 'My team', 'team'), link('#/teams', 'Teams', 'teams'), link('#/clubs', 'Football club', 'clubs'), link('#/cup', 'Penalty cup', 'cup'), h('a', { href: '/aurex-pen?mode=reporter', title: 'Watch running matches live' }, '📺 Reporter'), S.me && S.me.role === 'OWNER' ? link('#/admin', 'Owner panel', 'admin') : null, link('#/account', 'Account', 'account')),
       h('div', { class: 'who' }, h('span', { class: 'name' }, S.me.username + (S.me.role === 'OWNER' ? ' · Owner' : '')), h('button', { class: 'btn sm', onclick: signOut }, 'Sign out'))),
     h('main', { class: 'page' }, content));
 }
@@ -573,6 +573,9 @@ async function viewCup() {
       h('section', { class: 'panel mt14 mb14' }, h('h3', { class: 'mb6' }, 'Friendly duel'),
         h('p', { class: 'muted mb14' }, 'Practise against another team in a private room or the quick queue. Friendlies never count. One shoots, one keeps goal, then you swap. Five kicks each, sudden death if level, a draw if it is still level after ten kicks each. An AI referee and VAR watch every kick.'),
         h('div', { class: 'row' }, h('a', { class: 'btn' + (my ? '' : ' disabled'), href: my ? '/aurex-pen' : null, 'aria-disabled': my ? null : 'true' }, 'Play a friendly'), my ? null : h('span', { class: 'muted' }, 'Your team must be active to play.'))),
+      h('section', { class: 'panel mt14 mb14' }, h('h3', { class: 'mb6' }, '📺 Reporter · گزارشگر'),
+        h('p', { class: 'muted mb14' }, 'Watch the matches that are running right now. Pick a match from the live list and follow it from 9 camera angles (broadcast, kicker, keeper, net, goal, side, top view, ball cam) with instant slow-motion replays. You only watch; you cannot affect the match.'),
+        h('div', { class: 'row' }, h('a', { class: 'btn', href: '/aurex-pen?mode=reporter' }, 'Watch live matches'))),
       h('h3', { class: 'mt14 mb6' }, 'Latest results'), cupResults(d.recent)));
     return d;
   };

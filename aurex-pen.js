@@ -2,13 +2,15 @@
 (function () {
 'use strict';
 const $ = id => document.getElementById(id);
-const fatal = msg => { const m = $('menu'); m.classList.remove('off'); ['scrBoot', 'scrHome', 'scrQueue', 'scrLobby', 'scrEnd'].forEach(x => $(x).classList.toggle('hide', x !== 'scrBoot')); $('bootMsg').textContent = msg; $('bootLink').hidden = false; $('bootLink').textContent = 'Back to AUREX'; };
+const REP = new URLSearchParams(location.search).get('mode') === 'reporter';   // reporter = watch a running match (read-only, own socket)
+const SCREENS = ['scrBoot', 'scrHome', 'scrRep', 'scrQueue', 'scrLobby', 'scrEnd'];
+const fatal = msg => { const m = $('menu'); m.classList.remove('off'); SCREENS.forEach(x => $(x).classList.toggle('hide', x !== 'scrBoot')); $('bootMsg').textContent = msg; $('bootLink').hidden = false; $('bootLink').textContent = 'Back to AUREX'; };
 if (!window.THREE) { fatal('The 3D engine could not be loaded (three.js from cdnjs). Check your connection or ad-blocker and reload.'); return; }
 if (!window.AurexPenPhysics || !window.PenGfx) { fatal('A game file failed to load. Reload the page (Ctrl+F5). If it keeps happening, tell the owner.'); return; }
 if (!window.io) { fatal('Could not reach the game server connection (socket.io). Reload the page.'); return; }
 const P = window.AurexPenPhysics, C = P.C, Gfx = window.PenGfx;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-let roomJoinTried = false;
+let roomJoinTried = false, clockReady = false, onClock = null;
 let sock = null, off = 0, me = -1, uid = -1, actorList = [], room = null, players = [], league = false, stage = 'friendly', phase = 'menu', turn = null, role = 'none', st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: 0 }, cards = [0, 0];
 let aim = { ax: 0, ay: 0.4, curve: 0 }, charging = false, chargeT0 = 0, power = 0, sent = false, ballAll = [], strikeAt = 0, shotClockTimer = null, timers = [], lastKin = '0,0', runInfo = null, started = false, sbReady = false, myTeam = null;
 const keys = new Set(), srv = () => Date.now() + off, later = (ms, fn) => { const t = setTimeout(fn, Math.max(0, ms)); timers.push(t); return t; };
@@ -25,6 +27,7 @@ const Snd = (() => {
   const noise = (d, v = 0.3, hp = 400, lp = 6000) => { const a = ctx(); if (!a) return; const n = a.sampleRate * d, b = a.createBuffer(1, n, a.sampleRate), x = b.getChannelData(0); for (let i = 0; i < n; i++) x[i] = (Math.random() * 2 - 1) * (1 - i / n); const s = a.createBufferSource(); s.buffer = b; const f = a.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = Math.sqrt(hp * lp); f.Q.value = 0.5; const g = a.createGain(); g.gain.value = v; s.connect(f); f.connect(g); g.connect(master); s.start(); };
   return {
     unlock: ctx,
+    mute(on) { Snd._muted = !!on; ctx(); if (master) master.gain.value = on ? 0 : 0.5; },
     whistle() { tone(2900, 0.5, 'sine', 0.22); tone(3100, 0.5, 'sine', 0.16); },
     kick() { tone(150, 0.12, 'sine', 0.55, 60); noise(0.08, 0.35, 300, 3000); },
     net() { noise(0.55, 0.28, 800, 7000); },
@@ -84,6 +87,7 @@ function roleText() {
   const touch = matchMedia('(pointer:coarse)').matches;
   if (role === 'shooter') return touch ? `<b>YOU SHOOT</b>${k} — touch the goal to aim, <b>hold SHOOT</b> to charge, release to kick. ⟲ ⟳ curve · FEINT early in the run-up.` : `<b>YOU SHOOT</b>${k} — aim with the mouse / finger, hold <b>SPACE</b> to charge, release to shoot. <b>Q / E</b> curve · <b>F</b> feint (early in the run-up only).`;
   if (role === 'keeper') return touch ? `<b>YOU ARE THE GOALKEEPER</b>${k} — move with the left pad (▲ steps off the line, VAR watches!), dive with the right pad.` : `<b>YOU ARE THE GOALKEEPER</b>${k} — <b>A / D</b> move, <b>W</b> steps off the line (VAR watches!), dive: <b>← →</b> low · <b>Q / E</b> high · <b>↑</b> jump.`;
+  if (REP) return `📺 <b>${esc(turn.shooterName || '')}</b> shoots · <b>${esc(turn.keeperName || '')}</b> in goal${k}`;
   return `<b>${esc(turn.shooterName || '')}</b> shoots against <b>${esc(turn.keeperName || '')}</b>${k} — your turn comes next, watch the kick.`;
 }
 
@@ -119,7 +123,7 @@ function varVerdict(v, good) {
 }
 
 /* ------------------------------------------------------------------ socket events */
-function setScreen(id) { ['scrBoot', 'scrHome', 'scrQueue', 'scrLobby', 'scrEnd'].forEach(s => show(s, s === id)); $('menu').classList.remove('off'); }
+function setScreen(id) { SCREENS.forEach(s => show(s, s === id)); $('menu').classList.remove('off'); }
 function lobbyUI(r) {
   room = r; players = r.players.filter(Boolean);
   text('roomCode', r.code);
@@ -141,23 +145,24 @@ const names = sd => sd.members.map(m => m.username).join(' & ');
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function connect() {
-  sock = io('/aurex-pen', { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 500, reconnectionDelayMax: 3000 });
+  sock = io('/aurex-pen', { query: REP ? { mode: 'reporter' } : {}, transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 500, reconnectionDelayMax: 3000 });
   sock.on('connect_error', e => { text('bootMsg', e && /AUTH/.test(e.message) ? 'Please sign in to AUREX first.' : 'Connection problem: ' + (e && e.message)); if (e && /AUTH/.test(e.message)) { $('bootLink').hidden = false; sock.close(); } });
   sock.on('connect', () => { text('conn', ''); syncClock(); });
-  sock.on('disconnect', () => { if (phase !== 'end' && phase !== 'menu') text('conn', 'Connection lost — reconnecting… (you have 60 s)'); });
-  sock.on('hello', d => { myTeam = d.team; uid = d.user.id; setScreen('scrHome'); if (d.team) { text('myTeamName', d.team.name); text('myPlayer', d.user.username); $('myCrest').src = crest(d.team); } else { text('myTeamName', 'No active team'); text('myPlayer', d.user.username); } text('homeErr', d.error || ''); ['bQuick', 'bCreate', 'bJoin'].forEach(b => { $(b).disabled = !!d.error; });
+  sock.on('disconnect', () => { if (phase !== 'end' && phase !== 'menu') text('conn', REP ? 'Connection lost — reconnecting…' : 'Connection lost — reconnecting… (you have 60 s)'); });
+  sock.on('hello', d => { if (REP) return repHello(d); myTeam = d.team; uid = d.user.id; setScreen('scrHome'); if (d.team) { text('myTeamName', d.team.name); text('myPlayer', d.user.username); $('myCrest').src = crest(d.team); } else { text('myTeamName', 'No active team'); text('myPlayer', d.user.username); } text('homeErr', d.error || ''); ['bQuick', 'bCreate', 'bJoin'].forEach(b => { $(b).disabled = !!d.error; });
     // coming from the cup page ("Enter match"): go straight into the announced room, once
     const want = new URLSearchParams(location.search).get('room'); if (want && !d.error && !roomJoinTried) { roomJoinTried = true; $('codeIn').value = want.toUpperCase().slice(0, 5); try { history.replaceState(null, '', location.pathname); } catch (_) { } sock.emit('join', { code: want }); } });
   sock.on('err', d => { text('homeErr', d.message || d.code); if (d.code === 'OPENED_ELSEWHERE') { text('conn', d.message); } });
   sock.on('queue', () => setScreen('scrQueue'));
   sock.on('joined', d => { me = d.you; if (d.uid != null) uid = d.uid; setScreen('scrLobby'); lobbyUI(d.room); });
   sock.on('lobby', d => { if (phase === 'menu') lobbyUI(d.room); });
-  sock.on('room', d => { room = d.room; if (!started) return; const off2 = d.room.players.findIndex(p => p && !p.on); text('conn', off2 >= 0 ? (off2 === me ? '' : 'Opponent disconnected — waiting up to 60 s for them to return…') : ''); });
+  sock.on('room', d => { room = d.room; if (!started) return; const off2 = d.room.players.findIndex(p => p && !p.on); text('conn', off2 >= 0 ? (REP ? d.room.players[off2].team.name + ' lost the connection — waiting up to 60 s for them to return…' : off2 === me ? '' : 'Opponent disconnected — waiting up to 60 s for them to return…') : ''); });
+  if (REP) { sock.on('spec:list', repList); sock.on('spec:start', repStart); sock.on('spec:error', d => text('repErr', d.message || d.code)); sock.on('spec:end', repGone); }
   sock.on('match:start', onMatchStart);
   sock.on('sync', onSync);
   sock.on('turn', onTurn);
   sock.on('kp', d => Gfx.keeperTo(d.x, d.kz));
-  sock.on('runup', d => { phase = 'runup'; strikeAt = d.strikeAt; Gfx.startRun(d.runAt, d.strikeAt); Gfx.setStrike(d.strikeAt); runInfo = d; Gfx.setAim(aim.ax, aim.ay, aim.curve, false, 0); show('power', false); if (role === 'shooter') show('runbar', true); text('hint', role === 'shooter' ? 'Feint now = legal (green) · late = illegal (red)' : 'Read the run-up… dive when you decide'); });
+  sock.on('runup', onRunup);
   sock.on('feint', d => { Gfx.feint(d.progress, d.strikeAt); Gfx.setStrike(d.strikeAt); strikeAt = d.strikeAt; runInfo.strikeAt = d.strikeAt; runInfo.feintAt = d.progress; });
   sock.on('kick', onKick);
   sock.on('ball', onBall);
@@ -166,9 +171,10 @@ function connect() {
   sock.on('result', onResult);
   sock.on('end', onEnd);
 }
+function onRunup(d) { phase = 'runup'; strikeAt = d.strikeAt; Gfx.startRun(d.runAt, d.strikeAt); Gfx.setStrike(d.strikeAt); runInfo = d; Gfx.setAim(aim.ax, aim.ay, aim.curve, false, 0); show('power', false); if (role === 'shooter') show('runbar', true); text('hint', role === 'shooter' ? 'Feint now = legal (green) · late = illegal (red)' : REP ? '' : 'Read the run-up… dive when you decide'); }
 function syncClock() {
   const samples = []; let n = 0;
-  const one = () => { const t0 = Date.now(); sock.emit('ping:t', sv => { const t1 = Date.now(), rtt = t1 - t0; samples.push({ rtt, off: sv - (t0 + rtt / 2) }); if (++n < 6) setTimeout(one, 80); else { samples.sort((a, b) => a.rtt - b.rtt); off = samples[0].off; } }); };
+  const one = () => { const t0 = Date.now(); sock.emit('ping:t', sv => { const t1 = Date.now(), rtt = t1 - t0; samples.push({ rtt, off: sv - (t0 + rtt / 2) }); if (++n < 6) setTimeout(one, 80); else { samples.sort((a, b) => a.rtt - b.rtt); off = samples[0].off; clockReady = true; if (onClock) { const f = onClock; onClock = null; f(); } } }); };
   one();
 }
 
@@ -201,7 +207,7 @@ function initGfx() {
   requestAnimationFrame(loop);
 }
 function safeLoop() { try { Gfx.render(); } catch (e) { if (!safeLoop.warned) { safeLoop.warned = true; console.error('render error', e); text('conn', 'Graphics error: ' + e.message); } } }
-function loop() { safeLoop(); tickClock(); inputFrame(); requestAnimationFrame(loop); }
+function loop() { safeLoop(); tickClock(); inputFrame(); if (REP) repTick(); requestAnimationFrame(loop); }
 
 function onSync(d) {
   started = true; me = d.you; if (d.uid != null) uid = d.uid; league = d.league; stage = d.stage || (d.league ? 'league' : 'friendly'); players = d.room.players.filter(Boolean); st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first }; cards = d.cards || [0, 0];
@@ -228,13 +234,13 @@ function onTurn(d) {
   Gfx.setAim(aim.ax, aim.ay, 0, role === 'shooter', 0); Gfx.crowdCheer(false);
   $('role').innerHTML = roleText(); show('power', role === 'shooter'); show('curveui', role === 'shooter'); $('power').firstElementChild.style.width = '0%'; updateCurveUI();
   show('padShoot', role === 'shooter'); show('padKeep', role === 'keeper'); show('pad', role !== 'spectator');
-  text('hint', role === 'shooter' ? 'Wait for the whistle…' : role === 'keeper' ? 'Position yourself on the line — wait for the whistle' : 'Your teammate or opponent is on — watch and get ready');
+  text('hint', role === 'shooter' ? 'Wait for the whistle…' : role === 'keeper' ? 'Position yourself on the line — wait for the whistle' : REP ? '' : 'Your teammate or opponent is on — watch and get ready');
   if (d.retake) banner('RETAKE', '#ffd23f', 1400);
-  later(d.whistleAt - srv(), () => { if (phase === 'aim') { Snd.whistle(); Gfx.refSignal('whistle'); text('hint', role === 'shooter' ? 'WHISTLE — you can shoot!' : 'WHISTLE — the kicker is about to shoot'); } });
+  if (d.whistleAt > srv() - 300) later(d.whistleAt - srv(), () => { if (phase === 'aim') { Snd.whistle(); Gfx.refSignal('whistle'); text('hint', role === 'shooter' ? 'WHISTLE — you can shoot!' : REP ? '' : 'WHISTLE — the kicker is about to shoot'); } });
 }
 function onKick(d) {
   Snd.heart(false); phase = 'flight'; strikeAt = d.strikeAt; Gfx.setStrike(d.strikeAt); Gfx.camera(role === 'keeper' ? 'flightK' : 'flightS'); show('runbar', false); show('power', false); text('hint', '');
-  Gfx.keeperTo(d.keeper.x, d.keeper.kz); later(d.strikeAt - srv(), () => { Snd.kick(); }); Gfx.shake(0.02);
+  Gfx.keeperTo(d.keeper.x, d.keeper.kz); if (d.strikeAt > srv()) later(d.strikeAt - srv(), () => { Snd.kick(); }); Gfx.shake(0.02);
 }
 function onBall(d) {
   if (d.replace) { ballAll.length = Math.min(ballAll.length, d.from); Gfx.pushBall(d.from, [], true); }
@@ -251,7 +257,7 @@ function onResult(d) {
   (d.cards || []).forEach((c, i) => later(500 + i * 1700, () => flashCard(c.who, c.who === 'shooter' ? sName : kName)));
   const sub = verdict ? `<small>VAR · ${esc(verdict.headline)}</small>` : '';
   if (final === 'retake') { banner('RETAKE' + sub, '#ffd23f', 2400); Gfx.react('retake', sa, ka); return; }
-  if (final === 'goal') { banner('GOAL!' + sub, '#41e0a0', 2600); Gfx.react('goal', sa, ka); Gfx.crowdCheer(true); Snd.roar(true); later(900, () => { const rs = ballAll.filter(Boolean); if (rs.length > 8) { banner('REPLAY', '#cbd3e1', 2600); Gfx.startReplay(rs, 0.3, 'goalcam'); } }); }
+  if (final === 'goal') { banner('GOAL!' + sub, '#41e0a0', 2600); Gfx.react('goal', sa, ka); Gfx.crowdCheer(true); Snd.roar(true); later(900, () => { const rs = ballAll.filter(Boolean); if (rs.length > 8) { banner('REPLAY', '#cbd3e1', 2600); Gfx.startReplay(rs, REP ? repSpeed() : 0.3, 'goalcam'); if (REP) repReplayUI(); } }); }
   else if (final === 'save') { banner('SAVED!' + sub, '#5b95ff', 2400); Gfx.react('save', sa, ka); Snd.roar(false); }
   else if (final === 'post') { banner('OFF THE POST!' + sub, '#ffd23f', 2400); Gfx.react('miss', sa, ka); Snd.roar(false); }
   else { banner((d.timeout ? 'TOO SLOW!' : 'MISSED!') + sub, '#ff6b86', 2400); Gfx.react('miss', sa, ka); }
@@ -263,12 +269,13 @@ let lastEnd = null;
 function onEnd(d) {
   lastEnd = d; $('shareMsg').textContent = ''; Snd.heart(false); Snd.crowd(0.35, 0.8); $('hud').classList.remove('sd', 'hot'); show('sdTag', false);
   phase = 'end'; clearLater(); hideCard(); show('var', false); show('callbox', false); show('pad', false); text('role', ''); text('hint', ''); text('conn', ''); applyScore(d); Gfx.setAim(0, 0, 0, false, 0); Gfx.camera('end');
-  const win = d.winner === me, draw = d.winner == null; text('endTitle', draw ? 'DRAW' : win ? 'VICTORY' : 'DEFEAT'); text('endScore', `${d.table[0]} – ${d.table[1]}`);
+  const win = d.winner === me, draw = d.winner == null; text('endTitle', draw ? 'DRAW' : REP ? players[d.winner].team.name.toUpperCase() + ' WIN' : win ? 'VICTORY' : 'DEFEAT'); text('endScore', `${d.table[0]} – ${d.table[1]}`);
   text('endTeams', `${players[0].team.name}  vs  ${players[1].team.name}`);
   const mt = $('endMode'); mt.textContent = d.stage === 'final' ? 'FINAL — official result' : d.stage === 'semi' ? 'SEMI-FINAL — official result' : d.league ? 'LEAGUE MATCH — recorded in the AUREX table' : 'FRIENDLY — not counted in the table'; mt.className = 'tagline' + (d.league ? ' league' : '');
-  const why = { normal: 'Won after the regular five kicks.', sudden_death: 'Won in sudden death.', cap_draw: 'Level after 10 kicks each — the match is a draw.' + (d.stage === 'semi' || d.stage === 'final' ? ' The team that finished higher in the league table goes through.' : ''), forfeit: d.winner === me ? 'Your opponent left the match — 3–0 awarded.' : 'You left the match — 3–0 awarded to your opponent.' }[d.reason] || '';
+  const why = { normal: 'Won after the regular five kicks.', sudden_death: 'Won in sudden death.', cap_draw: 'Level after 10 kicks each — the match is a draw.' + (d.stage === 'semi' || d.stage === 'final' ? ' The team that finished higher in the league table goes through.' : ''), forfeit: REP ? 'A team left the match — 3–0 awarded to the other team.' : d.winner === me ? 'Your opponent left the match — 3–0 awarded.' : 'You left the match — 3–0 awarded to your opponent.' }[d.reason] || '';
   text('endWhy', why + (d.saved ? '' : '  (Warning: the result could not be saved — tell the owner.)'));
   if (!draw) { Gfx.react('goal', Math.max(0, actorList.findIndex(a => a.side === d.winner)), Math.max(0, actorList.findIndex(a => a.side !== d.winner))); Snd.roar(true); Gfx.crowdCheer(true); }
+  if (REP) { show('repbar', false); Gfx.setReporterCam('auto'); }
   later(2600, () => { setScreen('scrEnd'); });
 }
 
@@ -287,6 +294,7 @@ function doDive(screenDir, hi) {
 function onKey(e, down) {
   if (e.repeat && down) { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault(); return; }
   const c = e.code; if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(c)) e.preventDefault();
+  if (REP) { if (down) repKey(c); return; }
   if (down) keys.add(c); else keys.delete(c);
   if (role === 'shooter') {
     if (c === 'Space' && down && canShoot()) { charging = true; chargeT0 = performance.now(); Snd.unlock(); }
@@ -350,6 +358,81 @@ function bindFullscreen() {
   });
   document.addEventListener('fullscreenchange', sync); document.addEventListener('webkitfullscreenchange', sync); sync();
 }
-bindUI(); connect();
+/* ------------------------------------------------------------------ REPORTER (read-only spectator, own socket: ?mode=reporter) */
+// Angles: key 1-9 or the buttons, C / → next, ← previous. 'auto' = the normal director that follows the action.
+const ANGLES = [['auto', 'AUTO'], ['broadcast', 'BROADCAST'], ['shooter', 'KICKER'], ['keeper', 'KEEPER'], ['net', 'NET CAM'], ['goalcam', 'GOAL CAM'], ['side', 'SIDE'], ['top', 'TOP VIEW'], ['ball', 'BALL CAM']];
+let repAngle = 0, repSlowOn = true, repCode = null, repPoll = null, repAutoTried = false, repMuted = false, repWasReplaying = false;
+const repSpeed = () => (repSlowOn ? 0.3 : 1);
+function repAngleSet(i) {
+  repAngle = (i + ANGLES.length) % ANGLES.length; Gfx.setReporterCam(ANGLES[repAngle][0]);
+  document.querySelectorAll('#repAngles button').forEach((b, j) => { b.classList.toggle('on', j === repAngle); b.setAttribute('aria-pressed', String(j === repAngle)); });
+}
+function repHello(d) {
+  uid = d.user.id; text('repErr', '');
+  if (repCode) { sock.emit('spec:watch', { code: repCode }); return; }          // reconnected while watching: take the seat in the stand again
+  setScreen('scrRep');
+  clearInterval(repPoll); repPoll = setInterval(() => { if (!$('scrRep').classList.contains('hide') && !$('menu').classList.contains('off')) sock.emit('spec:list'); }, 4000);
+  const go = () => { sock.emit('spec:list'); const want = new URLSearchParams(location.search).get('code'); if (want && !repAutoTried) { repAutoTried = true; sock.emit('spec:watch', { code: want }); } };
+  if (clockReady) go(); else onClock = go;                                       // the match clock must be synchronised before the ball is drawn
+}
+function repList(d) {
+  const box = $('repList'), list = (d && d.list) || [];
+  if (!list.length) { box.innerHTML = '<p class="sub">No match is running right now. This list refreshes by itself — stay on this page and the next match will appear.</p>'; return; }
+  box.innerHTML = list.map(m => {
+    const a = m.sides[0], b = m.sides[1], tag = m.stage === 'final' ? 'FINAL' : m.stage === 'semi' ? 'SEMI-FINAL' : m.league ? 'LEAGUE' : 'FRIENDLY';
+    return `<button type="button" class="repm" data-c="${esc(m.code)}"><span class="rt"><img alt="" src="${crest(a.team)}"><b>${esc(a.team.name)}</b></span><span class="rs">${m.goals[0]} – ${m.goals[1]}<small>${tag}</small></span><span class="rt r"><b>${esc(b.team.name)}</b><img alt="" src="${crest(b.team)}"></span><small class="rw">${esc(a.players.join(' & '))} vs ${esc(b.players.join(' & '))} · kicks ${m.kicks[0]}/${m.kicks[1]} · 👁 ${m.watchers}</small></button>`;
+  }).join('');
+  box.querySelectorAll('button').forEach(b => { b.onclick = () => { Snd.unlock(); text('repErr', ''); sock.emit('spec:watch', { code: b.dataset.c }); }; });
+}
+function repStart(d) {
+  clearLater(); hideCard(); repCode = d.code; started = true; league = d.league; stage = d.stage || (d.league ? 'league' : 'friendly'); players = d.players.filter(Boolean); role = 'spectator'; me = -1; turn = null; ballAll = []; lastEnd = null;
+  st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first }; cards = d.cards || [0, 0]; phase = d.phase === 'intro' ? 'intro' : 'result';
+  $('menu').classList.add('off'); show('hud', true); show('pad', false); show('repbar', true); show('var', false); show('callbox', false); show('intro', false); $('fade').classList.remove('on'); show('runbar', false); show('power', false); show('curveui', false);
+  text('repWatch', `· ${d.watchers} watching`); text('role', ''); text('hint', ''); text('conn', ''); Snd.unlock(); Snd.ambience(); buildActors();
+  try { initGfx(); Gfx.setActors(actorList); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('spec:leave'); return; }
+  Gfx.setClock(srv); Gfx.stopIntro(); Gfx.clearTurn(); Gfx.crowdCheer(false); repAngleSet(repAngle); renderBoard();
+  const t = d.turn, sc = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first, cards: d.cards };
+  if (t && ['aim', 'runup', 'flight', 'reveal'].includes(d.phase)) {                       // joined in the middle of a kick: rebuild it from the same facts the players got
+    onTurn({ ...t, ...sc });
+    if (t.keeperPos) Gfx.keeperSnap(t.keeperPos.x, t.keeperPos.kz);
+    if (d.phase !== 'aim' && t.runAt) { onRunup({ runAt: t.runAt, strikeAt: t.strikeAt, runMs: t.runMs }); if (t.feint) Gfx.feint(t.feint.progress, t.strikeAt); }
+    if (t.dive) Gfx.setDive(t.dive.dir, t.dive.hi, t.dive.tdMs);
+    if (d.kick) { onKick(d.kick); onBall({ from: 0, pts: d.ball || [], ev: [] }); phase = d.phase === 'reveal' ? 'reveal' : 'flight'; }
+  } else {
+    if (t) { turn = t; applyScore(sc); }
+    Gfx.camera('result', true); text('hint', phase === 'intro' ? 'The match is about to start…' : 'Next kick coming up…');
+  }
+}
+function repBack() {
+  sock.emit('spec:leave'); repCode = null; clearLater(); hideCard(); Gfx.stopReplay(); Gfx.setReporterCam('auto'); Snd.heart(false);
+  started = false; turn = null; phase = 'menu'; role = 'none'; players = []; ballAll = [];
+  show('hud', false); show('repbar', false); show('var', false); show('callbox', false); show('pad', false); show('sdTag', false); $('hud').classList.remove('sd', 'hot'); $('banner').classList.remove('show'); text('conn', '');
+  setScreen('scrRep'); sock.emit('spec:list');
+}
+function repGone() { if (phase === 'end') return; repBack(); text('repErr', 'That match was cancelled.'); }
+function repReplay() {
+  if (!['result', 'waiting', 'end'].includes(phase)) { text('hint', 'Replay is available between kicks.'); return; }
+  const rs = ballAll.filter(Boolean); if (rs.length < 9) { text('hint', 'No kick to replay yet.'); return; }
+  Gfx.startReplay(rs, repSpeed(), 'goalcam'); repTick();
+}
+const repStopReplay = () => { Gfx.stopReplay(); repTick(); };
+function repSlowToggle() { repSlowOn = !repSlowOn; text('rSlow', 'SLOW-MO: ' + (repSlowOn ? 'ON' : 'OFF') + ' (M)'); }
+function repMuteToggle() { repMuted = !repMuted; Snd.mute(repMuted); text('rMute', repMuted ? '🔇' : '🔊'); }
+function repReplayUI() { repTick(); }
+function repTick() { const on = Gfx.isReplaying(); if (on !== repWasReplaying) { repWasReplaying = on; show('rStop', on); } }
+function repKey(c) {
+  if (!repCode) return;
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(c); if (m) return repAngleSet(+m[1] - 1);
+  if (c === 'KeyC' || c === 'ArrowRight') repAngleSet(repAngle + 1); else if (c === 'ArrowLeft') repAngleSet(repAngle - 1);
+  else if (c === 'KeyR') repReplay(); else if (c === 'KeyM') repSlowToggle(); else if (c === 'Escape') repStopReplay(); else if (c === 'KeyS') repMuteToggle();
+}
+function repInit() {
+  $('repAngles').innerHTML = ANGLES.map((a, i) => `<button type="button" data-i="${i}" aria-pressed="false"><i>${i + 1}</i>${a[1]}</button>`).join('');
+  $('repAngles').querySelectorAll('button').forEach(b => { b.onclick = () => { b.blur(); repAngleSet(+b.dataset.i); }; });
+  $('rRep').onclick = () => { $('rRep').blur(); repReplay(); }; $('rSlow').onclick = () => { $('rSlow').blur(); repSlowToggle(); }; $('rStop').onclick = repStopReplay; $('rMute').onclick = () => { $('rMute').blur(); repMuteToggle(); }; $('rExit').onclick = repBack; $('bRepBack').onclick = repBack;
+  document.body.classList.add('rep'); show('endBtns', false); show('bRepBack', true); repAngleSet(0);
+}
+
+bindUI(); if (REP) repInit(); connect();
 window.__pen = { get state() { return { phase, role, me, st, turn, league }; } };    // handy for debugging
 })();

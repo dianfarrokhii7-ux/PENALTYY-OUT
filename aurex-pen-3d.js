@@ -290,11 +290,18 @@ function camTarget(mode, t) {
     case 'goalcam': return [[4.8, 1.0, -3.2], [-0.5, 1.1, 2.4], 42];
     case 'side': return [[-11, 1.8, 9], [0, 1.1, 5.5], 40];
     case 'var': return [[0, 9, 7], [0, 0, 5], 46];
+    // reporter angles (spectators only)
+    case 'broadcast': return [[Math.sin(t * 0.15) * 1.2, 4.6, 23.5], [0, 1.0, 4], 44];
+    case 'net': return [[0, 0.95, -2.6], [0, 1.2, 11], 52];
+    case 'top': return [[0, 27, 14.5], [0, 0, 6.5], 52];
+    case 'ball': return [[spot.x * 0.6, spot.y + 0.75, spot.z + 2.7], [spot.x, Math.max(0.2, spot.y), spot.z - 5], 58];
     case 'end': return [[Math.sin(t * 0.25) * 9, 2.4, 9 + Math.cos(t * 0.25) * 4], [0, 1.2, 8], 50];
     default: return [[0, 6, 22], [0, 1, 6], 55];
   }
 }
 Gfx.camera = function (mode, snap) { S.mode = mode; if (snap) S.camSnap = true; };
+/** Reporter: the viewer picks one fixed angle ('auto' = the normal director that follows the action). Replays use it too. */
+Gfx.setReporterCam = function (name) { S.rcam = name && name !== 'auto' ? name : null; S.camSnap = true; };
 
 /* ----------------------------------------------------------------------------- public API */
 Gfx.init = function (cv, opts) {
@@ -458,6 +465,7 @@ Gfx.render = function () {
     reticle.visible = !!S.aim.show; if (S.aim.show) { reticle.position.set(S.aim.ax * C.HALF_W, Math.max(0.1, S.aim.ay * C.BAR_H), 0.08); reticle.scale.setScalar(1 + S.aim.power * 1.2 + Math.sin(nowP / 160) * 0.04); reticle.children[0].material.color.setHSL(0.33 - S.aim.power * 0.33, 1, 0.6); }
     // camera
     let mode = S.mode; if (S.replay) mode = S.replay.cam || 'goalcam';
+    if (S.rcam) mode = S.rcam;
     if (mode === 'menu') mode = 'default';
     const tg = camTarget(mode, nowP / 1000); camPos.lerp(tmpV.set(tg[0][0], tg[0][1], tg[0][2]), S.camSnap ? 1 : 0.075); const wanted = tmpV.set(tg[1][0], tg[1][1], tg[1][2]); camLook.lerp(wanted, S.camSnap ? 1 : 0.12); S.camSnap = false;
     const fov = tg[2] * (Gfx.baseFov ? Gfx.baseFov / 52 : 1); if (Math.abs(cam.fov - fov) > 0.05) { cam.fov += (fov - cam.fov) * 0.08; cam.updateProjectionMatrix(); }

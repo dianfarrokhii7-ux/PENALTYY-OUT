@@ -65,7 +65,7 @@ const MAX_MEMBERS = 2;
   /* ---------------------------------------------------------------- rooms */
   /** A friendly room (random code that starts with a LETTER) or the room of an announced league fixture (its own code, starts with a digit). */
   function makeRoom(fixture) {
-    const r = { code: fixture ? fixture.roomCode : newCode(), id: crypto.randomUUID(), phase: 'lobby', players: [null, null], league: false, stage: fixture ? fixture.stage : 'friendly', fixture: fixture || null, sh: null, t: {}, turn: null, waiting: false, saved: false, varCount: 0, vars: [], createdAt: now(), ended: false };
+    const r = { code: fixture ? fixture.roomCode : newCode(), id: crypto.randomUUID(), phase: 'lobby', players: [null, null], league: false, stage: fixture ? fixture.stage : 'friendly', fixture: fixture || null, sh: null, t: {}, turn: null, waiting: false, saved: false, varCount: 0, vars: [], createdAt: now(), ended: false, specs: new Set() };
     rooms.set(r.code, r); return r;
   }
   /** Seats a user on the side of HIS team (a second registered member joins his teammate's side) or on a free side. Returns the side index or -1. */
@@ -80,7 +80,7 @@ const MAX_MEMBERS = 2;
   }
   const memberOf = (r, userId) => { for (const sd of r.players) { const m = sd && sd.members.find(x => x.userId === userId); if (m) return m; } return null; };
   const idxOf = (r, userId) => r.players.findIndex(s => s && s.members.some(m => m.userId === userId));
-  function destroy(r) { clearTimers(r); for (const sd of r.players) if (sd) for (const m of sd.members) if (userRoom.get(m.userId) === r) userRoom.delete(m.userId); rooms.delete(r.code); }
+  function destroy(r) { clearTimers(r); for (const s of [...r.specs]) { s.data.spec = null; try { s.leave(r.code); } catch (_) { } s.emit('spec:end', { code: r.code }); } r.specs.clear(); for (const sd of r.players) if (sd) for (const m of sd.members) if (userRoom.get(m.userId) === r) userRoom.delete(m.userId); rooms.delete(r.code); }
   function lobbyUpdate(r) { emit(r, 'lobby', { room: roomView(r) }); }
 
   function checkEligible(sock) {
@@ -278,8 +278,49 @@ const MAX_MEMBERS = 2;
     }, T.reconnectMs);
   }
 
+  /* ---------------------------------------------------------------- reporter (read-only spectators) */
+  const SPEC_MAX = 300, LIVE_PHASES = ['intro', 'waiting', 'aim', 'runup', 'flight', 'reveal', 'var', 'result'];
+  const isLive = r => !!r.sh && !r.ended && LIVE_PHASES.includes(r.phase);
+  const liveInfo = r => ({ code: r.code, stage: r.stage, league: r.stage !== 'friendly', phase: r.phase, watchers: r.specs.size, goals: [...r.sh.goals], kicks: [...r.sh.kicks],
+    sides: r.players.map(sd => ({ team: { id: sd.team.id, name: sd.team.name, hasLogo: !!sd.team.hasLogo, club: sd.team.club ? { id: sd.team.club.id, short: sd.team.club.short, colors: sd.team.club.colors } : null }, players: sd.members.map(m => m.username) })) });
+  /** What a spectator needs to join in the middle of a match: the same facts the players' own events carry (turn / kick / ball), nothing private. */
+  function specSnapshot(r) {
+    const t = r.turn, nm = id => (memberOf(r, id) || {}).username;
+    const out = { code: r.code, matchId: r.id, phase: r.phase, league: r.stage !== 'friendly', stage: r.stage, players: r.players.map(pub), ...scoreView(r), cards: r.players.map(p => p.yellow), watchers: r.specs.size, ts: now() };
+    if (t && r.phase !== 'intro') {
+      out.turn = { k: t.k, shooter: t.side, keeper: t.keeper, shooterUser: t.shooterUser, keeperUser: t.keeperUser, shooterName: nm(t.shooterUser), keeperName: nm(t.keeperUser), retake: t.retakes, whistleAt: t.whistleAt, deadline: t.deadline, strikeAt: t.strikeAt, runAt: t.runAt, runMs: RUN, keeperPos: r.players[t.keeper].kp, dive: t.dive, feint: t.feint };
+      if (t.launch && t.sim && t.kpAtStrike) { out.kick = { k: t.k, strikeAt: t.strikeAt, curve: t.launch.curve, speed: +t.launch.speed.toFixed(1), keeper: t.kpAtStrike, lookMs: T.lookMs }; out.ball = t.sim.samples.slice(0, t.sentIdx); }
+    }
+    return out;
+  }
+  function specStop(sock) {
+    const code = sock.data && sock.data.spec; if (!code) return;
+    sock.data.spec = null; try { sock.leave(code); } catch (_) { }
+    const r = rooms.get(code); if (r) r.specs.delete(sock);
+  }
+  /** A reporter socket (client connects with ?mode=reporter): it never takes the player's seat, never replaces his game tab and has NO game handlers at all. */
+  function reporterConnection(socket) {
+    const u = socket.data.user, wrap = fn => (...a) => { try { fn(...a); } catch (e) { console.error('[aurex-pen] reporter handler error:', e); } };
+    let lastList = 0, lastWatch = 0;
+    socket.emit('hello', { user: u, spectator: true, ts: now() });
+    socket.on('ping:t', wrap(cb => { if (typeof cb === 'function') cb(now()); }));
+    socket.on('spec:list', wrap(() => { const tn = now(); if (tn - lastList < 700) return; lastList = tn; socket.emit('spec:list', { list: [...rooms.values()].filter(isLive).map(liveInfo), ts: tn }); }));
+    socket.on('spec:watch', wrap(d => {
+      const tn = now(); if (tn - lastWatch < 300) return; lastWatch = tn;
+      const code = String(d && d.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5), r = rooms.get(code);
+      if (!r || !isLive(r)) return socket.emit('spec:error', { code: 'MATCH_NOT_LIVE', message: 'This match is not running (any more).' });
+      if (socket.data.spec === code) return;
+      if (r.specs.size >= SPEC_MAX) return socket.emit('spec:error', { code: 'FULL', message: 'Too many reporters are watching this match.' });
+      specStop(socket); socket.join(code); r.specs.add(socket); socket.data.spec = code;
+      socket.emit('spec:start', specSnapshot(r));
+    }));
+    socket.on('spec:leave', wrap(() => specStop(socket)));
+    socket.on('disconnect', wrap(() => specStop(socket)));
+  }
+
   /* ---------------------------------------------------------------- sockets */
   nsp.on('connection', socket => {
+    if (socket.handshake && socket.handshake.query && socket.handshake.query.mode === 'reporter') return reporterConnection(socket);
     const u = socket.data.user, old = userSocket.get(u.id);
     if (old && old !== socket) { old.emit('err', { code: 'OPENED_ELSEWHERE', message: 'AUREX was opened in another tab or device.' }); old.data.replaced = true; old.disconnect(true); }
     userSocket.set(u.id, socket);
@@ -363,7 +404,7 @@ const MAX_MEMBERS = 2;
     }));
   });
 
-  return { rooms, userRoom, nsp, _queue: () => queue };
+  return { rooms, userRoom, nsp, _queue: () => queue, _live: () => [...rooms.values()].filter(isLive).map(liveInfo) };
 }
 
 module.exports = { attach, DEFAULT_TIMING };
