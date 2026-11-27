@@ -75,15 +75,18 @@
     stop(); const root = $('cer'); if (!root || !cer) return false;
     cur = { crest: o.crest, snd: o.snd }; const pre = Math.max(2000, o.preMs || cer.preMs || 18000), el0 = Math.max(0, o.elapsedMs || 0);
     const ids = o.players.map(p => p.team.id);
-    $('cerTitleYear').textContent = `SEASON ${cer.year || new Date().getFullYear()} · OPENING CEREMONY`;
-    $('cerMatchNo').textContent = `OPENING MATCH · MATCH ${cer.matchNo || 1} OF ${cer.matchTotal || '–'}`;
+    const kind = cer.kind || 'league', yr = cer.year || new Date().getFullYear();
+    $('cerTitleYear').textContent = kind === 'final' ? `SEASON ${yr} · THE FINAL` : kind === 'semi' ? `SEASON ${yr} · SEMI-FINAL` : `SEASON ${yr} · OPENING CEREMONY`;
+    $('cerMatchNo').textContent = kind === 'final' ? 'THE FINAL · THE CUP IS ON THE LINE' : kind === 'semi' ? 'SEMI-FINAL · ONE STEP FROM THE FINAL' : `OPENING MATCH · MATCH ${cer.matchNo || 1} OF ${cer.matchTotal || '–'}`;
+    $('cerFpA').src = o.crest(o.players[0].team); $('cerFpB').src = o.crest(o.players[1].team);
     $('cerVsA').src = o.crest(o.players[0].team); $('cerVsB').src = o.crest(o.players[1].team);
     $('cerVsNA').textContent = o.players[0].team.name; $('cerVsNB').textContent = o.players[1].team.name;
     teamCard(o.players[0], 0, cer); teamCard(o.players[1], 1, cer); table(cer, ids); nextCard(cer); setReporters(cer.reporters);
     $('cerTeamsLbl').textContent = `${cer.teamCount || (cer.standings || []).length} TEAMS · ONE CUP`;
     root.classList.remove('hide'); root.classList.remove('lt'); fxStart();
     // timeline in fractions of the ceremony time: title, the pairing, team A, team B, the table, the next match
-    const T = [['title', 0], ['vs', 0.2], ['teamA', 0.36], ['teamB', 0.52], ['table', 0.68], ['next', 0.84]];
+    const T = kind === 'league' ? [['title', 0], ['vs', 0.16], ['teamA', 0.30], ['teamB', 0.44], ['fair', 0.58], ['table', 0.72], ['next', 0.86]]
+      : cer.next ? [['title', 0], ['vs', 0.28], ['fair', 0.56], ['next', 0.78]] : [['title', 0], ['vs', 0.34], ['fair', 0.68]];
     T.forEach(([name, f], k) => {
       const start = pre * f - el0, end = (k + 1 < T.length ? pre * T[k + 1][1] : pre) - el0;
       if (end <= 0) return;                                                        // a late reporter skips the scenes that are already over

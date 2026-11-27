@@ -66,3 +66,15 @@ The **first announced league match of the cup** (the earliest fixture by time, a
 - **3D** (`aurex-pen-3d.js`): before the walk-out the camera circles the empty stadium around a spinning golden trophy (`startIntro(t0, durMs, preMs)`). **SKIP** (button) jumps to the walk-out; it never changes the server clock.
 - Reduced-motion users get no fireworks. No inline styles are used (page CSP: `style-src 'self'`).
 - Test: `test/pen-room.js` (opening match carries the ceremony with a 0-point table and the next match; the second match does not).
+
+**Semi-finals and the final** get a short ceremony too (`finalExtraMs`, default 9 000 ms): title (`THE FINAL` / `SEMI-FINAL`) → pairing → fair play → (semi-finals) the other semi-final as "next match". The league opening has an extra **FAIR PLAY** scene (respect / sportsmanship) between the team cards and the table. `ceremony.kind` is `league | semi | final`.
+
+## Owner as host + reporter of league matches (اونر در اتاق بازی)
+Announced matches (league, semi-finals, final) are **started by the owner**. Friendlies from the lobby are unchanged (they start when everybody is ready).
+1. Owner panel → Penalty league → match row → **🎙 Host match** (= `/aurex-pen?mode=reporter&host=ROOMCODE`). The owner can enter before the announced time; the room is created for him and the two teams join it as usual once it opens.
+2. The owner sees both teams and who is ready. The players' lobby shows *"waiting for the owner…"* / *"OWNER x IS IN THE ROOM"*.
+3. When **every player of both teams** pressed Ready, the owner's **▶ START MATCH** button turns on. Only he can start the match (players pressing Ready never start it).
+4. After START the owner is moved into the stand as a **reporter**: opening ceremony, 9 camera angles, replays. His name appears in the ceremony lower third as commentator.
+- Server (`aurex/pen-room.js`): reporter sockets of an `OWNER` account get `host:join {code}`, `host:start`, `host:leave` (events back: `host:joined`, `host:error`, `host:end`, `host:watch`); nobody else has these handlers. The room's `lobby` payload carries `needsHost`, `host`, `awaitingHost`. A match that is already running opens as a normal reporter view. An owner whose own team plays in the match cannot host it. A 2nd owner tab replaces the 1st.
+- If the owner never comes the match does not start (use the walkover buttons). Option `attach(..., { requireHost: false })` restores the old auto-start (tests only).
+- Test: `test/pen-room.js` (players cannot start, owner start, reporter view, no game handlers).

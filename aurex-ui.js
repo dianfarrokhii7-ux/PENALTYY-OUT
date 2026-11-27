@@ -446,7 +446,7 @@ function fixtureTable(list, admin, reload) {
     return h('tr', null, stageCell, matchCell,
       h('td', null, f.played ? fmtWhen(f.scheduledAt) : h('div', { class: 'row' }, when, save)),
       h('td', null, h('span', { class: 'chip code' }, f.roomCode)), h('td', null, fxStatus(f)),
-      h('td', null, f.played ? null : h('div', { class: 'row' }, walk(f.teamA), walk(f.teamB), del)));
+      h('td', null, f.played ? null : h('div', { class: 'row' }, h('a', { class: 'btn sm primary', href: '/aurex-pen?mode=reporter&host=' + encodeURIComponent(f.roomCode), title: 'Enter the room, wait for both teams, press START and report the match' }, '🎙 Host match'), walk(f.teamA), walk(f.teamB), del)));
   });
   return h('div', { class: 'panel scroll' }, h('table', { class: 'tbl' }, h('thead', null, h('tr', null, heads.map(x => h('th', null, x)))), h('tbody', null, rows)));
 }

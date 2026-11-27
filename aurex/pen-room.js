@@ -13,7 +13,7 @@ const P = require('./pen-physics');
 const { judge } = require('./pen-ai');
 const { C } = P;
 
-const DEFAULT_TIMING = { aimMs: 25000, introMs: 10000, openingExtraMs: 18000, whistleMs: 1600, resultMs: 3600, varExtraMs: 1200, retakeMs: 2600, reconnectMs: 60000, queueMs: 180000, tickMs: 40, streamMs: 50, lookMs: 250, cleanupMs: 90000 };
+const DEFAULT_TIMING = { aimMs: 25000, introMs: 10000, openingExtraMs: 18000, finalExtraMs: 9000, whistleMs: 1600, resultMs: 3600, varExtraMs: 1200, retakeMs: 2600, reconnectMs: 60000, queueMs: 180000, tickMs: 40, streamMs: 50, lookMs: 250, cleanupMs: 90000 };
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const num = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -23,6 +23,7 @@ function attach(io, { store, api }, opts = {}) {
   const core = api.core, T = { ...DEFAULT_TIMING, ...(opts.timing || {}) };
   const RUN = T.runupMs || C.RUNUP_MS, FDELAY = T.feintDelayMs || C.FEINT_DELAY_MS, S = opts.timeScale || 1;   // S > 1 only in tests (faster than real time)
   const rng = opts.rng || Math.random, now = opts.now || Date.now;
+  const REQUIRE_HOST = opts.requireHost !== false;     // announced league / semi-final / final matches are started by the OWNER (he enters the room as host)
   const nsp = io.of('/aurex-pen');
   const rooms = new Map();            // code -> room
   const userRoom = new Map();         // userId -> room
@@ -39,7 +40,10 @@ const pub = s => s ? { team: s.team, members: s.members.map(memberView), on: s.m
 const MAX_MEMBERS = 2;
   const clearTimers = r => { for (const k of Object.keys(r.t)) { clearTimeout(r.t[k]); clearInterval(r.t[k]); } r.t = {}; };
   const scoreView = r => r.sh ? { kicks: [...r.sh.kicks], goals: [...r.sh.goals], log: r.sh.log.map(l => l.map(e => ({ ...e }))), first: r.sh.first } : null;
-  const roomView = r => ({ code: r.code, phase: r.phase, league: r.stage !== 'friendly', stage: r.stage, players: r.players.map(pub), ...(r.sh ? scoreView(r) : {}) });
+  const needsHost = r => REQUIRE_HOST && !!r.fixture;
+  const sidesReady = r => !!(r.players[0] && r.players[1]) && r.players.every(sd => sd.members.length > 0 && sd.members.every(m => m.ready));
+  const hostKey = r => r.code + ':host';
+  const roomView = r => ({ code: r.code, phase: r.phase, league: r.stage !== 'friendly', stage: r.stage, players: r.players.map(pub), needsHost: needsHost(r), host: r.host ? { userId: r.host.userId, username: r.host.username } : null, awaitingHost: needsHost(r) && r.phase === 'lobby' && sidesReady(r), ...(r.sh ? scoreView(r) : {}) });
 
   async function playerInfo(user) {
     const team = await store.getActiveTeamForUser(user.id);
@@ -57,7 +61,7 @@ const MAX_MEMBERS = 2;
       const s = m ? await core.authenticate(m[1]) : null;
       if (!s) return next(new Error('AUTH_REQUIRED'));
       const info = await playerInfo(s.user);
-      socket.data = { user: { id: s.user.id, username: s.user.username }, team: info.team || null, teamError: info.error || null };
+      socket.data = { user: { id: s.user.id, username: s.user.username, role: s.user.role }, team: info.team || null, teamError: info.error || null };
       next();
     } catch (e) { next(new Error('AUTH_FAILED')); }
   });
@@ -65,7 +69,7 @@ const MAX_MEMBERS = 2;
   /* ---------------------------------------------------------------- rooms */
   /** A friendly room (random code that starts with a LETTER) or the room of an announced league fixture (its own code, starts with a digit). */
   function makeRoom(fixture) {
-    const r = { code: fixture ? fixture.roomCode : newCode(), id: crypto.randomUUID(), phase: 'lobby', players: [null, null], league: false, stage: fixture ? fixture.stage : 'friendly', fixture: fixture || null, sh: null, t: {}, turn: null, waiting: false, saved: false, varCount: 0, vars: [], createdAt: now(), ended: false, specs: new Set() };
+    const r = { code: fixture ? fixture.roomCode : newCode(), id: crypto.randomUUID(), phase: 'lobby', players: [null, null], league: false, stage: fixture ? fixture.stage : 'friendly', fixture: fixture || null, sh: null, t: {}, turn: null, waiting: false, saved: false, varCount: 0, vars: [], createdAt: now(), ended: false, specs: new Set(), host: null };
     rooms.set(r.code, r); return r;
   }
   /** Seats a user on the side of HIS team (a second registered member joins his teammate's side) or on a free side. Returns the side index or -1. */
@@ -80,8 +84,8 @@ const MAX_MEMBERS = 2;
   }
   const memberOf = (r, userId) => { for (const sd of r.players) { const m = sd && sd.members.find(x => x.userId === userId); if (m) return m; } return null; };
   const idxOf = (r, userId) => r.players.findIndex(s => s && s.members.some(m => m.userId === userId));
-  function destroy(r) { clearTimers(r); for (const s of [...r.specs]) { s.data.spec = null; try { s.leave(r.code); } catch (_) { } s.emit('spec:end', { code: r.code }); } r.specs.clear(); for (const sd of r.players) if (sd) for (const m of sd.members) if (userRoom.get(m.userId) === r) userRoom.delete(m.userId); rooms.delete(r.code); }
-  function lobbyUpdate(r) { emit(r, 'lobby', { room: roomView(r) }); }
+  function destroy(r) { clearTimers(r); if (r.host) { const hs = r.host.socket; r.host = null; hs.data.host = null; try { hs.leave(hostKey(r)); } catch (_) { } hs.emit('host:end', { code: r.code }); } for (const s of [...r.specs]) { s.data.spec = null; try { s.leave(r.code); } catch (_) { } s.emit('spec:end', { code: r.code }); } r.specs.clear(); for (const sd of r.players) if (sd) for (const m of sd.members) if (userRoom.get(m.userId) === r) userRoom.delete(m.userId); rooms.delete(r.code); }
+  function lobbyUpdate(r) { emit(r, 'lobby', { room: roomView(r) }); if (r.host) nsp.to(hostKey(r)).emit('lobby', { room: roomView(r), ts: now() }); }
 
   function checkEligible(sock) {
     if (sock.data.teamError) { sock.emit('err', { code: 'TEAM_NOT_ACTIVE', message: sock.data.teamError }); return false; }
@@ -94,7 +98,7 @@ const MAX_MEMBERS = 2;
     const i = idxOf(r, sock.data.user.id); sock.leave(r.code); userRoom.delete(sock.data.user.id);
     if (i >= 0) { const sd = r.players[i]; sd.members = sd.members.filter(m => m.userId !== sock.data.user.id); if (!sd.members.length) r.players[i] = null; }
     if (r.players[0] === null && r.players[1]) { r.players[0] = r.players[1]; r.players[1] = null; }
-    if (!r.players[0]) destroy(r); else { r.players.forEach(sd => { if (sd) sd.members.forEach(m => { m.ready = false; }); }); lobbyUpdate(r); }
+    if (!r.players[0] && !r.host) destroy(r); else { r.players.forEach(sd => { if (sd) sd.members.forEach(m => { m.ready = false; }); }); lobbyUpdate(r); }
   }
   function tryQuick(sock) {
     const me = sock.data.user.id;
@@ -113,20 +117,23 @@ const MAX_MEMBERS = 2;
     const out = []; for (const s of r.specs) { const n = s.data && s.data.user && s.data.user.username; if (n && !out.includes(n)) out.push(n); if (out.length >= 3) break; }
     return out;
   }
-  /** Only the FIRST announced league fixture, and only while no league match has been played yet, gets the ceremony: the room is the one that opens the cup. */
+  /** Ceremony data for a fixture, or null. League: only the FIRST announced fixture while no league match has been played (the cup opening, long).
+   *  Semi-finals and the final get a short version (title, pairing, fair play, next match). */
   async function openingCeremony(r) {
-    if (!r.fixture || r.fixture.stage !== 'league') return null;
+    if (!r.fixture || !['league', 'semi', 'final'].includes(r.fixture.stage)) return null;
     let cup; try { cup = await core.penCup(null); } catch (_) { return null; }
-    if (!cup || !cup.league.started || cup.progress.leaguePlayed > 0) return null;
-    const lf = cup.fixtures.filter(f => f.stage === 'league');
-    if (!lf.length || lf[0].id !== r.fixture.id) return null;
-    const nx = lf.find(f => f.id !== r.fixture.id && !f.played);
-    return {
-      opening: true, cup: 'AUREX PENALTY CUP', year: new Date(now()).getFullYear(), matchNo: 1, matchTotal: cup.progress.leagueTotal, teamCount: cup.league.teamCount,
-      standings: cup.standings.map(x => ({ rank: x.rank, team: liveTeam({ id: x.teamId, name: x.name, hasLogo: x.hasLogo }), played: x.played, points: x.points, gd: x.gd })),
-      next: nx ? { teamA: liveTeam(nx.teamA), teamB: liveTeam(nx.teamB), scheduledAt: nx.scheduledAt || null } : null,
-      serverNow: now(),
-    };
+    if (!cup || !cup.league.started) return null;
+    const base = { cup: 'AUREX PENALTY CUP', year: new Date(now()).getFullYear(), teamCount: cup.league.teamCount, serverNow: now(),
+      standings: cup.standings.map(x => ({ rank: x.rank, team: liveTeam({ id: x.teamId, name: x.name, hasLogo: x.hasLogo }), played: x.played, points: x.points, gd: x.gd })) };
+    const nextOf = f => f ? { teamA: liveTeam(f.teamA), teamB: liveTeam(f.teamB), scheduledAt: f.scheduledAt || null } : null;
+    if (r.fixture.stage === 'league') {
+      if (cup.progress.leaguePlayed > 0) return null;
+      const lf = cup.fixtures.filter(f => f.stage === 'league');
+      if (!lf.length || lf[0].id !== r.fixture.id) return null;
+      return { ...base, opening: true, kind: 'league', preMs: T.openingExtraMs, matchNo: 1, matchTotal: cup.progress.leagueTotal, next: nextOf(lf.find(f => f.id !== r.fixture.id && !f.played)) };
+    }
+    const same = cup.fixtures.filter(f => f.stage === r.fixture.stage && f.id !== r.fixture.id && !f.played);
+    return { ...base, opening: false, kind: r.fixture.stage, preMs: T.finalExtraMs, next: r.fixture.stage === 'semi' ? nextOf(same[0]) : null };
   }
   /** Tell everybody in the room who the reporters are (only while the ceremony is on screen). */
   function ceremonyReporters(r) { if (r.ceremony && r.phase === 'intro') emit(r, 'ceremony:reporters', { reporters: reporterNames(r) }); }
@@ -142,10 +149,11 @@ const MAX_MEMBERS = 2;
     if (r.phase !== 'starting') return;
     r.league = r.stage === 'league';                             // only the round robin counts in the table; friendlies never do
     const first = rng() < 0.5 ? 0 : 1; r.sh = Rules.newShootout(first); r.phase = 'intro'; r.k = 0;
-    const introMs = T.introMs + (cer ? T.openingExtraMs : 0); r.ceremony = cer ? { ...cer, introMs, preMs: T.openingExtraMs } : null; r.introAt = now(); r.introMs = introMs;
+    const introMs = T.introMs + (cer ? cer.preMs : 0); r.ceremony = cer ? { ...cer, introMs } : null; r.introAt = now(); r.introMs = introMs;
     if (r.ceremony) r.ceremony.reporters = reporterNames(r);
     emit(r, 'match:start', { matchId: r.id, league: r.stage !== 'friendly', stage: r.stage, first, players: r.players.map(pub), introMs, room: roomView(r), ...(r.ceremony ? { ceremony: r.ceremony } : {}) });
     r.t.intro = setTimeout(() => nextKick(r), introMs);
+    hostToReporter(r);                                           // the owner who started the match now watches it like a reporter (گزارشگر)
   }
 
   /** 2-player teams: the members of a team take turns. Kick n of a side is taken by member (n mod size); the keeper of the other side rotates the same way.
@@ -327,6 +335,53 @@ const MAX_MEMBERS = 2;
     sock.data.spec = null; try { sock.leave(code); } catch (_) { }
     const r = rooms.get(code); if (r) { r.specs.delete(sock); ceremonyReporters(r); }
   }
+
+  /* ---------------------------------------------------------------- owner = host of a league match */
+  /** The owner who is waiting in the lobby of a league room is moved into the stand: from now on he is an ordinary reporter of this match (names show in the ceremony). */
+  function hostToReporter(r) {
+    const h = r.host; if (!h) return; r.host = null;
+    const sk = h.socket; sk.data.host = null; try { sk.leave(hostKey(r)); } catch (_) { }
+    if (sk.data.spec && sk.data.spec !== r.code) specStop(sk);
+    sk.join(r.code); r.specs.add(sk); sk.data.spec = r.code;
+    sk.emit('spec:start', specSnapshot(r)); ceremonyReporters(r);
+  }
+  function hostLeave(sock) {
+    const code = sock.data && sock.data.host; if (!code) return;
+    sock.data.host = null; try { sock.leave(code + ':host'); } catch (_) { }
+    const r = rooms.get(code); if (!r || !r.host || r.host.socket !== sock) return;
+    r.host = null;
+    if (r.phase === 'lobby') { if (!r.players[0] && !r.players[1]) destroy(r); else lobbyUpdate(r); }
+  }
+  function hostHandlers(socket, wrap) {
+    const u = socket.data.user, fail = (c, message) => socket.emit('host:error', { code: c, message });
+    socket.on('host:join', wrap(async d => {
+      if (u.role !== 'OWNER') return fail('FORBIDDEN', 'Only the owner can host a league match.');
+      const code = String(d && d.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+      if (!Rules.isFixtureCode(code)) return fail('NOT_A_LEAGUE_ROOM', 'This is not the room code of an announced league match.');
+      let f = null; try { f = await store.getPenFixtureByCode(code); } catch (_) { f = null; }
+      if (!f) return fail('ROOM_NOT_FOUND', 'Room not found.');
+      if (f.matchId) return fail('MATCH_PLAYED', 'This league match has already been played.');
+      const team = socket.data.team; if (team && (team.id === f.teamA || team.id === f.teamB)) return fail('OWNER_IS_PLAYER', 'Your own team plays in this match, so you cannot host it.');
+      let r = rooms.get(code);
+      if (r && isLive(r)) { socket.emit('host:watch', { code }); return; }       // already running: just watch it
+      if (r && r.phase !== 'lobby') return fail('ROOM_BUSY', 'This match has already started.');
+      if (r && r.host && r.host.userId !== u.id) return fail('HOST_TAKEN', 'Another owner is already hosting this match.');
+      if (socket.data.host && socket.data.host !== code) hostLeave(socket);
+      if (socket.data.spec) specStop(socket);
+      if (!r) r = makeRoom(f);
+      if (r.host && r.host.socket !== socket) { const old = r.host.socket; old.data.host = null; try { old.leave(hostKey(r)); } catch (_) { } old.emit('host:end', { code, replaced: true }); }
+      r.host = { userId: u.id, username: u.username, socket }; socket.data.host = code; socket.join(hostKey(r));
+      socket.emit('host:joined', { code, room: roomView(r), ts: now() }); lobbyUpdate(r);
+    }));
+    socket.on('host:start', wrap(() => {
+      const code = socket.data.host, r = code && rooms.get(code);
+      if (!r || !r.host || r.host.socket !== socket) return fail('NOT_HOSTING', 'You are not hosting a room.');
+      if (r.phase !== 'lobby') return;
+      if (!sidesReady(r)) return fail('NOT_READY', 'Both teams must be in the room and every player must press Ready first.');
+      startMatch(r).catch(e => console.error('[aurex-pen] start failed:', e));
+    }));
+    socket.on('host:leave', wrap(() => hostLeave(socket)));
+  }
   /** A reporter socket (client connects with ?mode=reporter): it never takes the player's seat, never replaces his game tab and has NO game handlers at all. */
   function reporterConnection(socket) {
     const u = socket.data.user, wrap = fn => (...a) => { try { fn(...a); } catch (e) { console.error('[aurex-pen] reporter handler error:', e); } };
@@ -344,7 +399,8 @@ const MAX_MEMBERS = 2;
       socket.emit('spec:start', specSnapshot(r)); ceremonyReporters(r);
     }));
     socket.on('spec:leave', wrap(() => specStop(socket)));
-    socket.on('disconnect', wrap(() => specStop(socket)));
+    if (u.role === 'OWNER') hostHandlers(socket, wrap);     // only the OWNER can host a league room; nobody else gets these handlers
+    socket.on('disconnect', wrap(() => { hostLeave(socket); specStop(socket); }));
   }
 
   /* ---------------------------------------------------------------- sockets */
@@ -389,7 +445,7 @@ const MAX_MEMBERS = 2;
       let r = rooms.get(code);
       if (r && r.phase !== 'lobby') return fail('ROOM_FULL', 'This match has already started.');
       if (!r) r = makeRoom(f);
-      const i = seat(r, socket); if (i < 0) { if (!r.players[0] && !r.players[1]) destroy(r); return fail('ROOM_FULL', 'This room is full (or your team already has 2 players in it).'); }
+      const i = seat(r, socket); if (i < 0) { if (!r.players[0] && !r.players[1] && !r.host) destroy(r); return fail('ROOM_FULL', 'This room is full (or your team already has 2 players in it).'); }
       r.players.forEach(sd => { if (sd) sd.members.forEach(m => { m.ready = false; }); });
       socket.emit('joined', { you: i, uid: u.id, code: r.code, room: roomView(r), ts: now() }); lobbyUpdate(r);
     }
@@ -408,7 +464,9 @@ const MAX_MEMBERS = 2;
     socket.on('ready', wrap(() => {
       const r = room(); if (!r || r.phase !== 'lobby' || !r.players[0] || !r.players[1]) return;
       memberOf(r, u.id).ready = true; lobbyUpdate(r);
-      if (r.players.every(sd => sd.members.every(m => m.ready))) startMatch(r).catch(e => console.error('[aurex-pen] start failed:', e));
+      if (!r.players.every(sd => sd.members.every(m => m.ready))) return;
+      if (needsHost(r)) { lobbyUpdate(r); return; }         // league match: both teams are ready, now the OWNER presses START
+      startMatch(r).catch(e => console.error('[aurex-pen] start failed:', e));
     }));
     socket.on('shoot', wrap(d => { const r = room(); if (r) onShoot(r, u.id, d || {}); }));
     socket.on('feint', wrap(() => { const r = room(); if (r) onFeint(r, u.id); }));

@@ -2,7 +2,9 @@
 (function () {
 'use strict';
 const $ = id => document.getElementById(id);
-const REP = new URLSearchParams(location.search).get('mode') === 'reporter';   // reporter = watch a running match (read-only, own socket)
+const REP = new URLSearchParams(location.search).get('mode') === 'reporter';
+const HOST_CODE = REP ? String(new URLSearchParams(location.search).get('host') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) : '';   // owner hosting a league match: enter the room, press START, then watch as the reporter
+let hostActive = false;   // reporter = watch a running match (read-only, own socket)
 const SCREENS = ['scrBoot', 'scrHome', 'scrRep', 'scrQueue', 'scrLobby', 'scrEnd'];
 const fatal = msg => { const m = $('menu'); m.classList.remove('off'); SCREENS.forEach(x => $(x).classList.toggle('hide', x !== 'scrBoot')); $('bootMsg').textContent = msg; $('bootLink').hidden = false; $('bootLink').textContent = 'Back to AUREX'; };
 if (!window.THREE) { fatal('The 3D engine could not be loaded (three.js from cdnjs). Check your connection or ad-blocker and reload.'); return; }
@@ -139,7 +141,13 @@ function lobbyUI(r) {
   });
   const both = r.players[0] && r.players[1], mine = r.players[me] && r.players[me].members.find(m => m.userId === uid);
   $('bReady').disabled = !both || !mine || mine.ready;
-  text('lobbyMsg', both ? 'Opponent found. Every player in the room must press Ready.' : 'Share this code: the opponent (another team) or your registered teammate can join.');
+  if (hostActive) {                                            // the owner's view of a league room
+    show('bReady', false); show('bStart', true); $('bStart').disabled = !r.awaitingHost; text('roomHostTag', 'YOU ARE THE HOST');
+    text('lobbyMsg', r.awaitingHost ? 'Both teams are ready. Press START MATCH — you will then watch it live as the reporter (گزارشگر).' : both ? 'Waiting until every player of both teams has pressed Ready…' : 'Waiting for the two teams to enter this room…');
+    text('modeNote', both ? `${r.players[0].members.length} + ${r.players[1].members.length} players in the room` : ''); return;
+  }
+  show('bReady', true); show('bStart', false); text('roomHostTag', r.needsHost ? (r.host ? 'OWNER ' + r.host.username.toUpperCase() + ' IS IN THE ROOM' : 'WAITING FOR THE OWNER TO ENTER') : '');
+  text('lobbyMsg', r.awaitingHost ? (r.host ? 'Both teams are ready — waiting for the owner to start the match…' : 'Both teams are ready — waiting for the owner to enter the room and start the match…') : both ? 'Opponent found. Every player in the room must press Ready.' : 'Share this code: the opponent (another team) or your registered teammate can join.');
   text('modeNote', both ? `${r.players[0].members.length} + ${r.players[1].members.length} players · kicks rotate between teammates` : '');
 }
 function buildActors() { actorList = []; players.forEach((sd, i) => sd.members.forEach(m => actorList.push({ username: m.username, team: sd.team, side: i, userId: m.userId }))); }
@@ -158,9 +166,12 @@ function connect() {
   sock.on('err', d => { text('homeErr', d.message || d.code); if (d.code === 'OPENED_ELSEWHERE') { text('conn', d.message); } });
   sock.on('queue', () => setScreen('scrQueue'));
   sock.on('joined', d => { me = d.you; if (d.uid != null) uid = d.uid; setScreen('scrLobby'); lobbyUI(d.room); });
-  sock.on('lobby', d => { if (phase === 'menu') lobbyUI(d.room); });
+  sock.on('lobby', d => { if (phase === 'menu' && (!REP || hostActive)) lobbyUI(d.room); });
   sock.on('room', d => { room = d.room; if (!started) return; const off2 = d.room.players.findIndex(p => p && !p.on); text('conn', off2 >= 0 ? (REP ? d.room.players[off2].team.name + ' lost the connection — waiting up to 60 s for them to return…' : off2 === me ? '' : 'Opponent disconnected — waiting up to 60 s for them to return…') : ''); });
-  if (REP) { sock.on('spec:list', repList); sock.on('spec:start', repStart); sock.on('spec:error', d => text('repErr', d.message || d.code)); sock.on('spec:end', repGone); }
+  if (REP) { sock.on('host:joined', d => { hostActive = true; me = -1; setScreen('scrLobby'); lobbyUI(d.room); }); sock.on('host:error', d => { hostActive = false; setScreen('scrRep'); text('repErr', d.message || d.code); sock.emit('spec:list'); });
+    sock.on('host:end', d => { if (!hostActive) return; hostActive = false; if (d && d.replaced) { text('repErr', 'You opened this room in another tab.'); } else if (!repCode) text('repErr', 'The room was closed.'); if (!repCode) { setScreen('scrRep'); sock.emit('spec:list'); } });
+    sock.on('host:watch', d => { hostActive = false; sock.emit('spec:watch', { code: d.code }); });
+    sock.on('spec:list', repList); sock.on('spec:start', repStart); sock.on('spec:error', d => text('repErr', d.message || d.code)); sock.on('spec:end', repGone); }
   sock.on('match:start', onMatchStart); sock.on('ceremony:reporters', d => { if (window.AurexCeremony) AurexCeremony.setReporters(d.reporters); });
   sock.on('sync', onSync);
   sock.on('turn', onTurn);
@@ -213,7 +224,7 @@ function onMatchStart(d) {
   st = { kicks: [0, 0], goals: [0, 0], log: [[], []], first: d.first }; $('menu').classList.add('off'); show('hud', true); show('pad', false); Snd.unlock(); Snd.ambience();
   buildActors();
   try { initGfx(); Gfx.setActors(actorList); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('leave'); return; }
-  const cer = d.ceremony && d.ceremony.opening ? d.ceremony : null, pre = cer ? (cer.preMs || 0) : 0, base = d.introMs - pre;
+  const cer = d.ceremony || null, pre = cer ? (cer.preMs || 0) : 0, base = d.introMs - pre;
   Gfx.setClock(srv); renderBoard(); text('role', ''); text('hint', ''); show('runbar', false); show('power', false); show('curveui', false);
   Gfx.startIntro(srv(), d.introMs, pre); Gfx.crowdCheer(true); Snd.roar(true);
   players.forEach((p, i) => { text('itn' + i, p.team.name); text('ipn' + i, names(p)); $('icr' + i).src = crest(p.team); });
@@ -359,8 +370,9 @@ function bindUI() {
   $('bJoin').onclick = () => { Snd.unlock(); sock.emit('join', { code: $('codeIn').value }); };
   $('codeIn').addEventListener('keydown', e => { if (e.key === 'Enter') $('bJoin').click(); });
   $('bCancel').onclick = () => { sock.emit('leave'); setScreen('scrHome'); };
-  $('bLeave').onclick = () => { sock.emit('leave'); setScreen('scrHome'); me = -1; };
+  $('bLeave').onclick = () => { if (hostActive) { sock.emit('host:leave'); hostActive = false; location.href = '/aurex#/admin/league'; return; } sock.emit('leave'); setScreen('scrHome'); me = -1; };
   $('bReady').onclick = () => { Snd.unlock(); sock.emit('ready'); $('bReady').disabled = true; };
+  $('bStart').onclick = () => { Snd.unlock(); $('bStart').disabled = true; sock.emit('host:start'); };
   addEventListener('contextmenu', e => e.preventDefault());
   $('bShare').onclick = shareResult;
   bindFullscreen();
@@ -382,7 +394,7 @@ function bindFullscreen() {
 /* ------------------------------------------------------------------ REPORTER (read-only spectator, own socket: ?mode=reporter) */
 // Angles: key 1-9 or the buttons, C / → next, ← previous. 'auto' = the normal director that follows the action.
 const ANGLES = [['auto', 'AUTO'], ['broadcast', 'BROADCAST'], ['shooter', 'KICKER'], ['keeper', 'KEEPER'], ['net', 'NET CAM'], ['goalcam', 'GOAL CAM'], ['side', 'SIDE'], ['top', 'TOP VIEW'], ['ball', 'BALL CAM']];
-let repAngle = 0, repSlowOn = true, repCode = null, repPoll = null, repAutoTried = false, repMuted = false, repWasReplaying = false;
+let repHostTried = false, repAngle = 0, repSlowOn = true, repCode = null, repPoll = null, repAutoTried = false, repMuted = false, repWasReplaying = false;
 const repSpeed = () => (repSlowOn ? 0.3 : 1);
 function repAngleSet(i) {
   repAngle = (i + ANGLES.length) % ANGLES.length; Gfx.setReporterCam(ANGLES[repAngle][0]);
@@ -391,11 +403,14 @@ function repAngleSet(i) {
 function repHello(d) {
   uid = d.user.id; text('repErr', '');
   if (repCode) { sock.emit('spec:watch', { code: repCode }); return; }          // reconnected while watching: take the seat in the stand again
+  if (HOST_CODE && !repHostTried) { repHostTried = true; hostEnter(); return; }
+  if (hostActive) { hostEnter(); return; }          // reconnected while watching: take the seat in the stand again
   setScreen('scrRep');
   clearInterval(repPoll); repPoll = setInterval(() => { if (!$('scrRep').classList.contains('hide') && !$('menu').classList.contains('off')) sock.emit('spec:list'); }, 4000);
   const go = () => { sock.emit('spec:list'); const want = new URLSearchParams(location.search).get('code'); if (want && !repAutoTried) { repAutoTried = true; sock.emit('spec:watch', { code: want }); } };
   if (clockReady) go(); else onClock = go;                                       // the match clock must be synchronised before the ball is drawn
 }
+function hostEnter() { const go = () => sock.emit('host:join', { code: HOST_CODE }); if (clockReady) go(); else onClock = go; }
 function repList(d) {
   const box = $('repList'), list = (d && d.list) || [];
   if (!list.length) { box.innerHTML = '<p class="sub">No match is running right now. This list refreshes by itself — stay on this page and the next match will appear.</p>'; return; }
@@ -406,13 +421,13 @@ function repList(d) {
   box.querySelectorAll('button').forEach(b => { b.onclick = () => { Snd.unlock(); text('repErr', ''); sock.emit('spec:watch', { code: b.dataset.c }); }; });
 }
 function repStart(d) {
-  clearLater(); hideCard(); repCode = d.code; started = true; league = d.league; stage = d.stage || (d.league ? 'league' : 'friendly'); players = d.players.filter(Boolean); role = 'spectator'; me = -1; turn = null; ballAll = []; lastEnd = null;
+  hostActive = false; clearLater(); hideCard(); repCode = d.code; started = true; league = d.league; stage = d.stage || (d.league ? 'league' : 'friendly'); players = d.players.filter(Boolean); role = 'spectator'; me = -1; turn = null; ballAll = []; lastEnd = null;
   st = { kicks: d.kicks, goals: d.goals, log: d.log, first: d.first }; cards = d.cards || [0, 0]; phase = d.phase === 'intro' ? 'intro' : 'result';
   $('menu').classList.add('off'); show('hud', true); show('pad', false); show('repbar', true); show('var', false); show('callbox', false); show('intro', false); $('fade').classList.remove('on'); show('runbar', false); show('power', false); show('curveui', false);
   text('repWatch', `· ${d.watchers} watching`); text('role', ''); text('hint', ''); text('conn', ''); Snd.unlock(); Snd.ambience(); buildActors();
   try { initGfx(); Gfx.setActors(actorList); } catch (e) { $('menu').classList.remove('off'); fatal('Graphics could not start: ' + e.message + '. Your browser/device needs WebGL — try Chrome or Safari, and turn on hardware acceleration.'); sock.emit('spec:leave'); return; }
   Gfx.setClock(srv); Gfx.stopIntro(); Gfx.clearTurn(); Gfx.crowdCheer(false); repAngleSet(repAngle); renderBoard();
-  if (d.phase === 'intro' && d.ceremony && d.ceremony.opening && d.introMs != null) {          // joined during the opening ceremony: watch the rest of it
+  if (d.phase === 'intro' && d.ceremony && d.introMs != null) {          // joined during the opening ceremony: watch the rest of it
     const cer = d.ceremony, pre = cer.preMs || 0, base = d.introMs - pre, elapsed = d.introMs - (d.introLeftMs || 0);
     if (elapsed < pre) {
       Gfx.startIntro(srv() - elapsed, d.introMs, pre); Gfx.crowdCheer(true); players.forEach((p, i) => { text('itn' + i, p.team.name); text('ipn' + i, names(p)); $('icr' + i).src = crest(p.team); });

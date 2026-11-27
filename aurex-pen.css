@@ -313,3 +313,15 @@ body.rep #role{bottom:calc(max(18px,env(safe-area-inset-bottom)) + 104px)}body.r
   #cerTable li{margin-bottom:3px;padding:4px 10px}#cerLT{bottom:2%}
 }
 @media (prefers-reduced-motion:reduce){#cer .sc,#cerLT,#cerTable li{transition:none;animation:none!important}#cerTable li{opacity:1;transform:none}}
+
+#cer .sc.fair{top:0;bottom:12%;background:linear-gradient(180deg,rgba(2,6,20,0),rgba(2,6,20,.78) 35%,rgba(2,6,20,.78) 65%,rgba(2,6,20,0))}
+#cer .sc.fair>p:first-child{margin:0;font:800 clamp(24px,6vw,52px) var(--head);letter-spacing:.2em;color:var(--gold)}
+#cer .fpr{display:flex;align-items:center;gap:min(5vw,36px);margin:16px 0}
+#cer .fpr img{width:min(20vw,110px);height:min(20vw,110px);border-radius:50%;object-fit:cover;border:3px solid #fff;background:#0a1638}
+#cer .fpr i{font-style:normal;font-size:clamp(36px,9vw,72px)}
+#cer .sc.fair h3{margin:0;font:800 clamp(16px,3.6vw,28px) var(--head);letter-spacing:.16em}
+#cer .sc.fair .sub{margin:12px 0 0;font:600 clamp(13px,2.8vw,18px) var(--body);color:var(--silver);letter-spacing:.04em}
+
+/* owner = host of a league room */
+.hosttag{margin:0 0 6px;font-weight:800;letter-spacing:.14em;font-size:12px;color:#f5c84a;text-align:center}
+.hosttag:empty{display:none}

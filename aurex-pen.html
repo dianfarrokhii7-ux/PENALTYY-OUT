@@ -60,6 +60,7 @@
   <div class="sc pair" data-sc="vs"><p id="cerMatchNo"></p><div class="vsrow"><div><img id="cerVsA" alt=""><b id="cerVsNA"></b></div><em>VS</em><div><img id="cerVsB" alt=""><b id="cerVsNB"></b></div></div><p class="sub" id="cerTeamsLbl"></p></div>
   <div class="sc team l" data-sc="teamA" id="cerTeamA"><small class="tclub"></small><img class="crest" alt=""><b class="tname"></b><span class="tcode"></span><div class="tplayers"></div><span class="tstat"></span></div>
   <div class="sc team r" data-sc="teamB" id="cerTeamB"><small class="tclub"></small><img class="crest" alt=""><b class="tname"></b><span class="tcode"></span><div class="tplayers"></div><span class="tstat"></span></div>
+  <div class="sc fair" data-sc="fair"><p>FAIR PLAY</p><div class="fpr"><img id="cerFpA" alt=""><i>🤝</i><img id="cerFpB" alt=""></div><h3>RESPECT · SPORTSMANSHIP</h3><p class="sub">Play hard. Play fair. Good luck to both teams.</p></div>
   <div class="sc tbl" data-sc="table"><h2>LEAGUE TABLE <span>MATCHDAY 1</span></h2><ul id="cerTable"></ul></div>
   <div class="sc nxt" data-sc="next" id="cerNext"><h2>NEXT MATCH</h2><div id="cerNextTeams"></div><p id="cerNextMsg"></p></div>
   <div id="cerLT"><div id="cerCommentary"><span class="lbl">LIVE ON</span><b class="who">AUREX TV</b></div><div id="cerRef"><span class="lbl">REFEREE</span><b>AI REFEREE + VAR</b></div></div>
@@ -86,10 +87,10 @@
   </section>
   <section id="scrQueue" class="screen hide"><h2>Looking for an opponent…</h2><div class="spin"></div><p class="sub">You are matched with a player from another AUREX team.</p><button class="btn alt" id="bCancel">Cancel</button></section>
   <section id="scrLobby" class="screen hide">
-    <h2>Room <b id="roomCode" class="code"></b></h2><p class="sub" id="lobbyMsg">Share this code with the opponent.</p>
+    <h2>Room <b id="roomCode" class="code"></b></h2><p class="hosttag" id="roomHostTag"></p><p class="sub" id="lobbyMsg">Share this code with the opponent.</p>
     <div class="vsrow"><div class="pcard" id="lp0"></div><div class="vs">VS</div><div class="pcard" id="lp1"></div></div>
     <p class="sub" id="modeNote"></p>
-    <button class="btn big" id="bReady" disabled>Ready</button><button class="btn alt" id="bLeave">Leave</button>
+    <button class="btn big" id="bReady" disabled>Ready</button><button class="btn big hide" id="bStart" type="button" disabled>▶ START MATCH</button><button class="btn alt" id="bLeave">Leave</button>
   </section>
   <section id="scrEnd" class="screen hide">
     <h2 id="endTitle"></h2><div class="bigscore" id="endScore"></div><p class="sub" id="endTeams"></p><p class="tagline" id="endMode"></p><p class="sub" id="endWhy"></p>
